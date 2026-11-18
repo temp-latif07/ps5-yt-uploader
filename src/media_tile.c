@@ -13,19 +13,164 @@
 #endif
 
 #if defined(PS5)
-int media_tile_register(const char* db_path, const char* app_title, const char* launch_url) {
-    (void)db_path; (void)app_title; (void)launch_url;
-    // On PS5, homescreen shortcuts are provisioned via WebKit AppCache package (itsPLK model)
+#include "shortcut_assets.h"
+#include "notify.h"
+
+#define PS5_TITLE_ID "PS5YT0001"
+
+int sceAppInstUtilInitialize(void);
+int sceAppInstUtilTerminate(void);
+int sceAppInstUtilAppInstallTitleDir(const char* title_id, const char* dir, void* reserved);
+int sceAppInstUtilAppInstallAll(void* reserved);
+int sceSystemServiceLaunchWebBrowser(const char* uri, void* reserved);
+
+static int ps5_mkdir_p(const char* path, mode_t mode) {
+    char tmp[256];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    size_t len = strlen(tmp);
+    if (len == 0) return 0;
+    if (tmp[len - 1] == '/') tmp[len - 1] = '\0';
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (mkdir(tmp, mode) != 0 && errno != EEXIST) {
+                return -1;
+            }
+            *p = '/';
+        }
+    }
+    if (mkdir(tmp, mode) != 0 && errno != EEXIST) {
+        return -1;
+    }
     return 0;
 }
 
-int media_tile_unregister(const char* db_path, const char* title_id) {
-    (void)db_path; (void)title_id;
+static int ps5_install_file(const char* path, const uint8_t* data, size_t size) {
+    FILE* f = fopen(path, "wb");
+    if (!f) return -1;
+    if (fwrite(data, 1, size, f) != size) {
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+    return 0;
+}
+
+static int ps5_file_needs_update(const char* path, const uint8_t* expected_data, size_t expected_size) {
+    struct stat st;
+    if (stat(path, &st) != 0) return 1;
+    if ((size_t)st.st_size != expected_size) return 1;
+    FILE* f = fopen(path, "rb");
+    if (!f) return 1;
+    uint8_t* buf = (uint8_t*)malloc(expected_size);
+    if (!buf) {
+        fclose(f);
+        return 1;
+    }
+    size_t read_bytes = fread(buf, 1, expected_size, f);
+    fclose(f);
+    if (read_bytes != expected_size) {
+        free(buf);
+        return 1;
+    }
+    int diff = memcmp(buf, expected_data, expected_size);
+    free(buf);
+    return diff != 0;
+}
+
+int media_tile_register(const char* db_path, const char* app_title, const char* launch_url) {
+    (void)db_path;
+    (void)app_title;
+    (void)launch_url;
+
+    const char* title_id = PS5_TITLE_ID;
+    char base_dir[256];
+    char sce_sys_dir[256];
+    char param_path[256];
+    char icon_path[256];
+
+    snprintf(base_dir, sizeof(base_dir), "/user/app/%s", title_id);
+    snprintf(sce_sys_dir, sizeof(sce_sys_dir), "/user/app/%s/sce_sys", title_id);
+    snprintf(param_path, sizeof(param_path), "/user/app/%s/sce_sys/param.json", title_id);
+    snprintf(icon_path, sizeof(icon_path), "/user/app/%s/sce_sys/icon0.png", title_id);
+
+    int update_needed = 0;
+    struct stat st;
+    if (stat(base_dir, &st) != 0) {
+        update_needed = 1;
+    } else {
+        if (ps5_file_needs_update(param_path, g_param_json, g_param_json_size)) {
+            update_needed = 1;
+        }
+        if (ps5_file_needs_update(icon_path, g_icon0_png, g_icon0_png_size)) {
+            update_needed = 1;
+        }
+    }
+
+    if (!update_needed) {
+        printf("[TILE] Tile %s is already installed and up to date\n", title_id);
+        return 0;
+    }
+
+    printf("[TILE] Installing PS5 home screen tile (%s)...\n", title_id);
+    notify_send("Installing YouTube Uploader Tile...");
+
+    if (sceAppInstUtilInitialize() != 0) {
+        printf("[TILE] Warning: sceAppInstUtilInitialize failed\n");
+    }
+
+    if (ps5_mkdir_p(sce_sys_dir, 0755) != 0) {
+        printf("[TILE] Failed to create app dir: %s (errno: %d)\n", sce_sys_dir, errno);
+        sceAppInstUtilTerminate();
+        return -1;
+    }
+
+    if (ps5_install_file(param_path, g_param_json, g_param_json_size) != 0) {
+        printf("[TILE] Failed to install param.json\n");
+        sceAppInstUtilTerminate();
+        return -1;
+    }
+
+    if (ps5_install_file(icon_path, g_icon0_png, g_icon0_png_size) != 0) {
+        printf("[TILE] Failed to install icon0.png\n");
+        sceAppInstUtilTerminate();
+        return -1;
+    }
+
+    int rc = sceAppInstUtilAppInstallTitleDir(title_id, "/user/app/", NULL);
+    if (rc != 0) {
+        printf("[TILE] sceAppInstUtilAppInstallTitleDir returned 0x%08x, falling back to sceAppInstUtilAppInstallAll\n", rc);
+        rc = sceAppInstUtilAppInstallAll(NULL);
+    }
+
+    sceAppInstUtilTerminate();
+
+    if (rc == 0) {
+        printf("[TILE] PS5 home screen tile %s registered successfully.\n", title_id);
+        notify_send("YouTube Uploader Tile Installed!");
+    } else {
+        printf("[TILE] App registration returned 0x%08x\n", rc);
+    }
+
     return 0;
 }
 
 int media_tile_launch_browser(const char* launch_url) {
-    (void)launch_url;
+    if (!launch_url || !*launch_url) {
+        return -1;
+    }
+    printf("[TILE] Launching PS5 browser: %s\n", launch_url);
+    int rc = sceSystemServiceLaunchWebBrowser(launch_url, NULL);
+    if (rc != 0) {
+        printf("[TILE] Failed to launch PS5 browser (error: 0x%08x)\n", rc);
+        return -1;
+    }
+    return 0;
+}
+
+int media_tile_unregister(const char* db_path, const char* title_id) {
+    (void)db_path;
+    (void)title_id;
     return 0;
 }
 #else

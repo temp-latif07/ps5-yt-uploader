@@ -10,6 +10,26 @@ Planned improvements and upcoming fixes for subsequent releases.
 
 ---
 
+## 1.0.4
+
+Automatic PS5 home screen tile installation, instant browser launch, and authentic PS5 Payload SDK toolchain integration.
+
+**New**
+- **Automatic Home Screen Tile Registration (itsPLK Architecture):** Running `ps5-yt-uploader.elf` once via Payload Manager now automatically provisions and registers the YouTube Uploader tile directly onto the PlayStation 5 home screen. Writes `/user/app/PS5YT0001/sce_sys/` with embedded `param.json` and 512x512 `icon0.png`, invokes `libSceAppInstUtil` (`sceAppInstUtilAppInstallTitleDir` / `sceAppInstUtilAppInstallAll`), and fires a confirmation toast. Clicking the home screen tile launches directly into the local Web Companion Studio.
+- **Automatic Companion Browser Launch:** On payload execution, the daemon automatically launches the native PS5 WebKit browser directly to `http://127.0.0.1:8888/` via `sceSystemServiceLaunchWebBrowser`.
+- **Embedded Shortcut Assets:** Integrated `scripts/bundle_shortcut.py` and `src/shortcut_assets.h` into the build system to embed tile metadata and icon assets directly within the ELF binary without external asset files.
+
+**Fixes**
+- **PS5 Payload SDK Toolchain & Runtime Dynamic Linker (`crt1.o`):** Resolved the root cause preventing the ELF from starting on PS5. Switched compilation to the official Sony PlayStation 5 target (`-target x86_64-sie-ps5`) linked with `crt1.o`. This provides the genuine payload entry point (`_start`), initializes the in-payload `rtld` dynamic linker to resolve system libraries (`libkernel.sprx`, `libSceLibcInternal.sprx`, `libSceAppInstUtil.sprx`, `libSceSystemService.sprx`), and eliminates the FreeBSD `/libexec/ld-elf.so.1` interpreter that caused `elfldr` to abort.
+- **Eliminated Undefined `libcurl` Dynamic Symbols:** Guarded host `libcurl` dependencies in `src/http_client.c` behind `#ifndef PS5` and implemented a native PS5 client using `libSceHttp.sprx`, completely eliminating the 8 undefined `curl_*` symbols that prevented `elfldr` relocation.
+- **Instant Visual Startup Feedback:** Dispatched an immediate `notify_send("YouTube Uploader starting...")` banner at daemon startup, ensuring instant visual feedback on the TV when launched from Payload Manager.
+
+**Behind the scenes**
+- **Self-Contained PS5 SDK (`vendor/ps5-sdk/`):** Bundled authentic PlayStation 5 headers and stubs directly in the repository for fast, reproducible local cross-compilation with zero external SDK installations required.
+- **E2E Toolchain Verification:** Extended `tests/test_e2e_integration.sh` to strictly verify zero unresolved `curl` symbols, absence of `.interp`, and verified DT_NEEDED linkage of `libSceAppInstUtil.sprx`.
+
+---
+
 ## 1.0.3
 
 Manual clip curation studio, authentic PS5 libkernel toast notifications, clean FreeBSD 12 ELF symbol isolation, and itsPLK homescreen shortcut integration.

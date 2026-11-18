@@ -5,12 +5,12 @@
       "id": "ps5-yt-uploader",
       "name": "PS5 YouTube Uploader",
       "filename": "ps5-yt-uploader.elf",
-      "url": "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.3/ps5-yt-uploader.elf",
+      "url": "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.4/ps5-yt-uploader.elf",
       "description": "Autonomous YouTube video uploader for PS5 captures with Media home screen tile and web companion.",
-      "version": "v1.0.3",
+      "version": "v1.0.4",
       "last_update": "2026-11-18",
       "category": "Utilities",
-      "checksum": "19bfdf822ff867a5ea7dd37dd9441fdfc277a9cde282b95fcb02942bc5cb0a51",
+      "checksum": "9f72ca9ef272abe4de22cd03d88fdfe2b88c85d0b34bf172a0d54fb61dcb32db",
       "author": "Latif Muhammad",
       "source": "https://github.com/temp-latif07/ps5-yt-uploader"
     }

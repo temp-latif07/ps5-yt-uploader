@@ -11,6 +11,8 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/stat.h>
+
+#ifndef PS5
 #include <curl/curl.h>
 
 static pthread_once_t g_curl_init_once = PTHREAD_ONCE_INIT;
@@ -18,6 +20,7 @@ static pthread_once_t g_curl_init_once = PTHREAD_ONCE_INIT;
 static void curl_global_init_routine(void) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
 }
+#endif
 
 void http_response_init(http_response_t* resp) {
     if (!resp) return;
@@ -90,6 +93,7 @@ static char* trim_whitespace(char* str) {
     return str;
 }
 
+#ifndef PS5
 typedef struct {
     FILE* fp;
     size_t remaining;
@@ -327,3 +331,169 @@ int http_client_request(const http_request_t* req, http_response_t* resp) {
 
     return 0;
 }
+#else
+/* Native PS5 libSceHttp client implementation */
+#include <stdint.h>
+
+int sceNetInit(void);
+int sceNetPoolCreate(const char* name, int size, int flags);
+int sceNetPoolDestroy(int pool_id);
+int sceSslInit(size_t size);
+int sceSslTerm(int ssl_ctx);
+int sceHttpInit(int net_pool, int ssl_ctx, size_t pool_size, int flags);
+int sceHttpTerm(int http_ctx);
+int sceHttpCreateTemplate(int http_ctx, const char* agent, int http_ver, int auto_redirect);
+int sceHttpDeleteTemplate(int tmpl_id);
+int sceHttpCreateRequestWithURL(int tmpl_id, const char* method, const char* url, uint64_t content_length);
+int sceHttpDeleteRequest(int req_id);
+int sceHttpAddRequestHeader(int req_id, const char* name, const char* value, int mode);
+int sceHttpSendRequest(int req_id, const void* data, size_t size);
+int sceHttpGetStatusCode(int req_id, int* status);
+int sceHttpReadData(int req_id, void* data, size_t size);
+int sceHttpGetAllResponseHeaders(int req_id, char** header, size_t* header_len);
+
+static int g_ps5_http_init_done = 0;
+static int g_ps5_net_pool = -1;
+static int g_ps5_ssl_ctx = -1;
+static int g_ps5_http_ctx = -1;
+
+static int ps5_http_init_global(void) {
+    if (g_ps5_http_init_done) return 0;
+    sceNetInit();
+    g_ps5_net_pool = sceNetPoolCreate("ps5_yt_net", 64 * 1024, 0);
+    if (g_ps5_net_pool < 0) return -1;
+    g_ps5_ssl_ctx = sceSslInit(256 * 1024);
+    if (g_ps5_ssl_ctx < 0) return -1;
+    g_ps5_http_ctx = sceHttpInit(g_ps5_net_pool, g_ps5_ssl_ctx, 256 * 1024, 1);
+    if (g_ps5_http_ctx < 0) return -1;
+    g_ps5_http_init_done = 1;
+    return 0;
+}
+
+int http_client_request(const http_request_t* req, http_response_t* resp) {
+    if (!req || !resp || !req->url || !req->method) return -1;
+    http_response_cleanup(resp);
+
+    if (ps5_http_init_global() != 0) {
+        return -1;
+    }
+
+    int tmpl = sceHttpCreateTemplate(g_ps5_http_ctx, "ps5-yt-uploader/1.0", 3, 1);
+    if (tmpl < 0) return -1;
+
+    uint64_t content_len = 0;
+    if (req->body && req->body_len > 0) {
+        content_len = req->body_len;
+    } else if (req->body_filepath) {
+        struct stat st;
+        if (stat(req->body_filepath, &st) == 0) {
+            content_len = req->file_length > 0 ? req->file_length : (size_t)st.st_size;
+        }
+    }
+
+    int http_req = sceHttpCreateRequestWithURL(tmpl, req->method, req->url, content_len);
+    if (http_req < 0) {
+        sceHttpDeleteTemplate(tmpl);
+        return -1;
+    }
+
+    if (req->headers) {
+        for (size_t i = 0; i < req->header_count; i++) {
+            if (req->headers[i].name[0] && req->headers[i].value) {
+                sceHttpAddRequestHeader(http_req, req->headers[i].name, req->headers[i].value, 0);
+            }
+        }
+    }
+
+    const void* send_data = NULL;
+    size_t send_size = 0;
+    void* file_buf = NULL;
+
+    if (req->body && req->body_len > 0) {
+        send_data = req->body;
+        send_size = req->body_len;
+    } else if (req->body_filepath) {
+        FILE* fp = fopen(req->body_filepath, "rb");
+        if (fp) {
+            if (req->file_offset > 0) {
+                fseek(fp, (long)req->file_offset, SEEK_SET);
+            }
+            size_t bytes_to_read = req->file_length;
+            if (bytes_to_read == 0) {
+                struct stat st;
+                if (stat(req->body_filepath, &st) == 0 && (size_t)st.st_size >= req->file_offset) {
+                    bytes_to_read = (size_t)st.st_size - req->file_offset;
+                }
+            }
+            if (bytes_to_read > 0) {
+                file_buf = malloc(bytes_to_read);
+                if (file_buf) {
+                    size_t r = fread(file_buf, 1, bytes_to_read, fp);
+                    send_data = file_buf;
+                    send_size = r;
+                }
+            }
+            fclose(fp);
+        }
+    }
+
+    int send_rc = sceHttpSendRequest(http_req, send_data, send_size);
+    if (file_buf) free(file_buf);
+
+    if (send_rc != 0) {
+        sceHttpDeleteRequest(http_req);
+        sceHttpDeleteTemplate(tmpl);
+        return -1;
+    }
+
+    int status = 0;
+    sceHttpGetStatusCode(http_req, &status);
+    resp->status_code = status;
+    snprintf(resp->status_message, sizeof(resp->status_message), "%d", status);
+
+    char* resp_headers = NULL;
+    size_t resp_headers_len = 0;
+    if (sceHttpGetAllResponseHeaders(http_req, &resp_headers, &resp_headers_len) == 0 && resp_headers) {
+        char* line = resp_headers;
+        while (*line) {
+            char* next = strchr(line, '\n');
+            if (next) *next = '\0';
+            char* cr = strchr(line, '\r');
+            if (cr) *cr = '\0';
+
+            char* colon = strchr(line, ':');
+            if (colon) {
+                *colon = '\0';
+                char* h_name = trim_whitespace(line);
+                char* h_val = trim_whitespace(colon + 1);
+                if (h_name && *h_name) {
+                    add_response_header(resp, h_name, h_val);
+                }
+            }
+            if (!next) break;
+            line = next + 1;
+        }
+    }
+
+    char chunk[4096];
+    int n = 0;
+    size_t total_read = 0;
+    char* body_acc = NULL;
+
+    while ((n = sceHttpReadData(http_req, chunk, sizeof(chunk))) > 0) {
+        char* new_acc = (char*)realloc(body_acc, total_read + n + 1);
+        if (!new_acc) break;
+        body_acc = new_acc;
+        memcpy(body_acc + total_read, chunk, n);
+        total_read += n;
+        body_acc[total_read] = '\0';
+    }
+
+    resp->body = body_acc;
+    resp->body_len = total_read;
+
+    sceHttpDeleteRequest(http_req);
+    sceHttpDeleteTemplate(tmpl);
+    return 0;
+}
+#endif

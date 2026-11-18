@@ -92,6 +92,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Immediate startup notification for visual confirmation on PS5
+    notify_send("YouTube Uploader starting...");
+
     // 1. config_init(data_dir): Ensure directory exists with 0777 and load config.json
     if (config_init(data_dir) != 0) {
         fprintf(stderr, "Error: Failed to initialize config in '%s'\n", data_dir);
@@ -117,6 +120,7 @@ int main(int argc, char* argv[]) {
         if (tile_rc != 0) {
             fprintf(stderr, "Warning: Failed to register media tile in MMS database '%s'\n", app_db ? app_db : "default");
         }
+        media_tile_launch_browser(launch_url);
     }
 
     // 3. Signal handling (SIGINT, SIGTERM, SIGPIPE)

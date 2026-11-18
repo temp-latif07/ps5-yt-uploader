@@ -227,6 +227,28 @@ if [ "$ELF_SIZE" -ge "$MAX_SIZE" ]; then
 fi
 echo "  -> Payload size constraint passed ($ELF_SIZE < 716800 bytes)!"
 
+# Check for zero curl symbols and proper PS5 library linkage
+READELF_BIN=$(which llvm-readelf 2>/dev/null || ls /opt/homebrew/Cellar/llvm*/*/bin/llvm-readelf 2>/dev/null | head -n 1)
+if [ -n "$READELF_BIN" ]; then
+    if "$READELF_BIN" -s bin/ps5-yt-uploader.elf | grep -i "curl_" >/dev/null; then
+        echo "FAIL: bin/ps5-yt-uploader.elf contains unresolved curl symbols!"
+        exit 1
+    fi
+    echo "  -> Confirmed: 0 unresolved curl symbols in PS5 ELF!"
+
+    if "$READELF_BIN" -S bin/ps5-yt-uploader.elf | grep -w "\.interp" >/dev/null; then
+        echo "FAIL: bin/ps5-yt-uploader.elf contains .interp section!"
+        exit 1
+    fi
+    echo "  -> Confirmed: Clean ELF with 0 .interp section!"
+
+    if ! "$READELF_BIN" -d bin/ps5-yt-uploader.elf | grep -q "libSceAppInstUtil.sprx"; then
+        echo "FAIL: bin/ps5-yt-uploader.elf missing libSceAppInstUtil.sprx in DT_NEEDED!"
+        exit 1
+    fi
+    echo "  -> Confirmed: Native PS5 AppInstUtil linked!"
+fi
+
 echo "=========================================================="
 echo "End-to-End Integration Test Passed Successfully!"
 echo "=========================================================="
