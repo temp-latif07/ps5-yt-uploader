@@ -177,14 +177,45 @@ else
     fi
 fi
 
-echo "==> Step 6: Creating annotated tag ${TAG}..."
+echo "==> Step 6: Updating Payload Manager catalog (payloads.json)..."
+python3 "${REPO_ROOT}/scripts/update_payload_repo.py" \
+    --version "${TAG}" \
+    --elf "${ELF_PATH}" \
+    --url "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/${TAG}/ps5-yt-uploader.elf" \
+    --output "${REPO_ROOT}/payloads.json"
+
+# Commit updated payloads.json if modified
+if [ -n "$(git status --porcelain payloads.json 2>/dev/null)" ]; then
+    echo "==> Committing updated payloads.json to main..."
+    git add payloads.json
+    git commit -m "chore(catalog): update payloads.json for ${TAG} [skip ci]"
+    git push origin main
+fi
+
+echo "==> Step 7: Creating annotated tag ${TAG}..."
 git tag -a "${TAG}" -m "Release ${TAG} - PS5 YouTube Uploader"
 
-echo "==> Step 7: Pushing tag ${TAG} to origin..."
+echo "==> Step 8: Pushing tag ${TAG} to origin..."
 git push origin "${TAG}"
 
+# Extract human-readable release notes from CHANGELOG.md
+RELEASE_NOTES=$(python3 "${REPO_ROOT}/scripts/extract_release_notes.py" "${TAG}" 2>/dev/null || echo "Release ${TAG} of PS5 YouTube Uploader.")
+
+echo "==> Step 9: Creating GitHub Release via gh CLI..."
+if command -v gh &>/dev/null && gh auth status &>/dev/null; then
+    gh release create "${TAG}" \
+        "${ELF_PATH}" \
+        "${ELF_PATH}.sha256" \
+        "bin/ps5-youtube.elf" \
+        --title "${TAG} - PS5 YouTube Uploader" \
+        --notes "${RELEASE_NOTES}" 2>/dev/null || {
+            echo "Notice: gh release create returned non-zero (release may already exist or CI is building)."
+        }
+    echo "  -> GitHub Release published instantly!"
+fi
+
 echo "=========================================================="
-echo ">> Successfully released and pushed tag ${TAG}!"
-echo ">> GitHub Actions workflow has been triggered at:"
-echo "   https://github.com/temp-latif07/ps5-yt-uploader/actions"
+echo ">> Successfully released and published tag ${TAG}!"
+echo ">> Release URL: https://github.com/temp-latif07/ps5-yt-uploader/releases/tag/${TAG}"
+echo ">> Payload Catalog: https://raw.githubusercontent.com/temp-latif07/ps5-yt-uploader/main/payloads.json"
 echo "=========================================================="
