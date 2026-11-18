@@ -1,5 +1,5 @@
 /**
- * PlayStation 5 YouTube Uploader (ps5-yt-uploader v1.0.0)
+ * PlayStation 5 YouTube Uploader (ps5-yt-uploader v1.0.2)
  * Embedded Dashboard Application
  * 100% Self-Contained Vanilla JS (Zero External Dependencies)
  */
@@ -8,7 +8,7 @@
   'use strict';
 
   const APP_NAME = 'ps5-yt-uploader';
-  const APP_VERSION = '1.0.0';
+  const APP_VERSION = '1.0.2';
 
   // --- Embedded QR Code Generator (ISO/IEC 18004 Minimal Implementation) ---
   const QRMath = {
@@ -613,7 +613,12 @@
 
       card.innerHTML =
         '<div class="clip-thumbnail-area">' +
-          '<div class="clip-game-icon">🎮</div>' +
+          '<div class="clip-game-icon">' +
+            '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+              '<rect x="4" y="12" width="40" height="24" rx="8"/>' +
+              '<path d="M12 24h8m-4-4v8m20-4h.02m-6 0h.02"/>' +
+            '</svg>' +
+          '</div>' +
           '<span class="clip-badge">' + safeTitleId + '</span>' +
           '<span class="clip-duration-tag">MP4</span>' +
         '</div>' +
@@ -626,7 +631,11 @@
           '</div>' +
           '<div class="clip-card-actions">' +
             '<button class="btn btn-primary btn-upload focusable" data-clip-index="' + idx + '" tabindex="0">' +
-              '<span class="btn-icon">▲</span> Upload to YouTube' +
+              '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                '<line x1="12" y1="19" x2="12" y2="5"/>' +
+                '<polyline points="5 12 12 5 19 12"/>' +
+              '</svg>' +
+              'Upload to YouTube' +
             '</button>' +
           '</div>' +
         '</div>';
@@ -691,7 +700,11 @@
 
       if (item.status === 'completed' && item.videoId) {
         const safeVid = escapeHtml(item.videoId);
-        linkHtml = '<a class="youtube-link" href="https://youtu.be/' + safeVid + '" target="_blank" rel="noopener">▶ View on YouTube (youtu.be/' + safeVid + ')</a>';
+        linkHtml = '<a class="youtube-link" href="https://youtu.be/' + safeVid + '" target="_blank" rel="noopener">' +
+          '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<polygon points="5 3 19 12 5 21 5 3"/>' +
+          '</svg>' +
+          'View on YouTube (youtu.be/' + safeVid + ')</a>';
       } else if (item.status === 'queued') {
         linkHtml = '<span>Waiting for worker slot...</span>';
       } else if (item.status === 'uploading') {
@@ -1045,8 +1058,10 @@
         if (urlInput) {
           urlInput.select();
           document.execCommand('copy');
-          btnCopyUrl.textContent = '✓ Copied!';
-          setTimeout(function () { btnCopyUrl.textContent = '📋 Copy'; }, 2000);
+          btnCopyUrl.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Copied!';
+          setTimeout(function () {
+            btnCopyUrl.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy';
+          }, 2000);
         }
       });
     }
@@ -1072,7 +1087,7 @@
           }
         } finally {
           btnConnectSession.disabled = false;
-          btnConnectSession.textContent = '✨ 1-Click Connect Current Session';
+          btnConnectSession.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>1-Click Connect Current Session';
         }
       });
     }
@@ -1105,7 +1120,7 @@
           }
         } finally {
           btnSaveAuth.disabled = false;
-          btnSaveAuth.textContent = '💾 Save & Authenticate';
+          btnSaveAuth.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save &amp; Authenticate';
         }
       });
     }

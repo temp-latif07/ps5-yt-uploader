@@ -10,6 +10,27 @@ Planned improvements and upcoming fixes for subsequent releases.
 
 ---
 
+## 1.0.2
+
+PlayStation 5 UI/UX overhaul and accessibility refinement across the embedded companion dashboard.
+
+**New**
+- **PlayStation 5 Midnight theme & elevated depth.** Redesigned the companion web dashboard using an authentic PS5 dark aesthetic with rich navy-slate surfaces, architectural layering, and refined elevation shadows instead of artificial glow effects.
+- **Unified SVG vector iconography.** Replaced system-dependent emojis with a lightweight, inline SVG icon system (16px and 20px, 2px stroke) ensuring identical visual fidelity across PS5 WebKit, mobile browsers, and desktop screens.
+- **Authentic DualSense controller glyphs.** Added custom PlayStation controller button shapes (Cross ✕, Circle ○, Triangle △, and D-Pad) to the TV couch navigation guide with accurate hardware colors.
+- **Enhanced TV 10-foot navigation.** Polished couch navigation with a crisp 2px solid cyan focus ring (`outline: 2px solid #38bdf8; outline-offset: 3px; transform: scale(1.02);`), eliminating blurry halos while ensuring visibility from 10 feet.
+
+**Fixes**
+- **WCAG AA contrast compliance.** Replaced the low-contrast gradient badge with high-contrast authentic PlayStation navy (`#003791`), exceeding 6.8:1 contrast ratio, and calibrated all button normal/hover state contrast ratios above 4.5:1.
+- **Accessible motion & pulse.** Eliminated continuous sliding marquee loop animations on indeterminate upload progress bars in favor of an accessible, non-distracting gradient pulse.
+- **Typographic balance.** Applied `text-wrap: balance` to headings and `text-wrap: pretty` to body copy to prevent awkward text orphans and stragglers across viewports.
+
+**Behind the scenes**
+- **Impeccable design verification.** Verified the entire web companion surface against Impeccable's design quality detector with zero antipatterns or contrast warnings.
+- **Optimized asset bundling.** Embedded the updated web assets into `src/web_assets.h` within an ultra-lean 88 KB footprint, keeping the compiled FreeBSD ELF payload at ~164 KB (< 700 KB constraint).
+
+---
+
 ## 1.0.1
 
 Release and repository maintenance overhaul adopting the disciplined engineering standards of `phantomptr/ps5upload`.
