@@ -31,6 +31,8 @@ typedef struct {
     char title[128];
     char description[512];
     char privacy[32];
+    int made_for_kids;
+    char playlist_id[64];
 } upload_task_t;
 
 static void handle_api_status(const char* req_body, char* resp_out, size_t max_resp) {
@@ -298,7 +300,10 @@ static void* upload_worker_thread(void* arg) {
     const char* desc = task->description[0] ? task->description :
                        "Uploaded from PlayStation 5 via PS5 YouTube Uploader";
 
-    int rc = youtube_upload_clip(&cfg, task->filepath, title, desc, privacy, 0, NULL, NULL, NULL, &result);
+    int rc = youtube_upload_clip(&cfg, task->filepath, title, desc, privacy,
+                                 task->made_for_kids,
+                                 task->playlist_id[0] ? task->playlist_id : NULL,
+                                 NULL, NULL, &result);
     if (rc == 0 && result.http_status == 200) {
         char msg[256];
         const char* url = result.youtube_url[0] ? result.youtube_url : result.video_id;
@@ -383,6 +388,16 @@ static void handle_api_upload(const char* req_body, char* resp_out, size_t max_r
     item = cJSON_GetObjectItem(root, "privacy");
     if (item && cJSON_IsString(item) && item->valuestring) {
         snprintf(task->privacy, sizeof(task->privacy), "%s", item->valuestring);
+    }
+
+    item = cJSON_GetObjectItem(root, "made_for_kids");
+    if (item && cJSON_IsBool(item)) {
+        task->made_for_kids = cJSON_IsTrue(item) ? 1 : 0;
+    }
+
+    item = cJSON_GetObjectItem(root, "playlist_id");
+    if (item && cJSON_IsString(item) && item->valuestring) {
+        snprintf(task->playlist_id, sizeof(task->playlist_id), "%s", item->valuestring);
     }
 
     cJSON_Delete(root);

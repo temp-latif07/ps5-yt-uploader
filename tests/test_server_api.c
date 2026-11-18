@@ -352,6 +352,37 @@ static void test_post_api_upload(void) {
     printf("  -> POST /api/upload queued clip successfully!\n");
 }
 
+static void test_post_api_upload_curated(void) {
+    printf("[Test 6b] Testing POST /api/upload with made_for_kids and playlist_id...\n");
+    int status = 0;
+    char headers[2048] = {0};
+    char body[4096] = {0};
+
+    char clip_path[512];
+    snprintf(clip_path, sizeof(clip_path), "%s/CUSA00001/clip2.mp4", TEST_CAPTURES_DIR);
+
+    char req_json[1024];
+    snprintf(req_json, sizeof(req_json),
+             "{\"filepath\":\"%s\",\"title\":\"Speedrun\",\"description\":\"No hit\",\"privacy\":\"PUBLIC\",\"made_for_kids\":true,\"playlist_id\":\"PL_BOSS_RUN\"}",
+             clip_path);
+
+    int rc = http_request(TEST_PORT, "POST", "/api/upload", req_json,
+                          "Content-Type: application/json\r\n",
+                          &status, headers, sizeof(headers), body, sizeof(body));
+    assert(rc == 0);
+    assert(status == 200);
+
+    cJSON* root = cJSON_Parse(body);
+    assert(root != NULL);
+    cJSON* st_item = cJSON_GetObjectItem(root, "status");
+    assert(st_item != NULL && strcmp(st_item->valuestring, "queued") == 0);
+    cJSON* succ = cJSON_GetObjectItem(root, "success");
+    assert(succ != NULL && cJSON_IsTrue(succ));
+    cJSON_Delete(root);
+
+    printf("  -> POST /api/upload with curated parameters queued successfully!\n");
+}
+
 static void test_not_found_route(void) {
     printf("[Test 7] Testing 404 for unknown route...\n");
     int status = 0;
@@ -546,6 +577,7 @@ int main(void) {
     test_post_api_config();
     test_post_api_auth();
     test_post_api_upload();
+    test_post_api_upload_curated();
     test_not_found_route();
     test_oversized_content_length();
     test_client_disconnect_and_sigpipe();
