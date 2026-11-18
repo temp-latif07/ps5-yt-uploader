@@ -153,6 +153,10 @@ if ! echo "$STATUS_AFTER_AUTH" | grep -q '"authenticated":true'; then
 fi
 echo "  -> Authentication confirmed!"
 
+echo "=== Step 5.5: Enabling Auto-Upload via POST /api/config for E2E Pipeline ==="
+CONFIG_RESP=$(curl -s -X POST -H "Content-Type: application/json" -d '{"auto_upload":true,"default_privacy":"UNLISTED"}' "http://127.0.0.1:$HOST_PORT/api/config")
+echo "  -> Config response: $CONFIG_RESP"
+
 echo "=== Step 6: Simulating Capture File Creation & Verifying Auto-Upload ==="
 mkdir -p "$CAPTURES_DIR/CUSA00123"
 SAMPLE_SRC="tests/assets/sample_clip.mp4"

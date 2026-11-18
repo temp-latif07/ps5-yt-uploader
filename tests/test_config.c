@@ -23,7 +23,7 @@ void test_config_defaults_and_io(void) {
     assert(config_load(&cfg) == 0);
     assert(cfg.server_port == 8888);
     assert(strcmp(cfg.default_privacy, "UNLISTED") == 0);
-    assert(cfg.auto_upload == 1);
+    assert(cfg.auto_upload == 0);
 
     strcpy(cfg.channel_id, "UC123456789");
     strcpy(cfg.session_token, "TOKEN_ABC_123");
@@ -41,7 +41,7 @@ void test_config_defaults_and_io(void) {
     assert(strcmp(loaded.channel_name, "My Channel") == 0);
     assert(loaded.server_port == 8888);
     assert(strcmp(loaded.default_privacy, "UNLISTED") == 0);
-    assert(loaded.auto_upload == 1);
+    assert(loaded.auto_upload == 0);
 }
 
 void test_history_deduplication(void) {

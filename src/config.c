@@ -201,7 +201,7 @@ int config_load(app_config_t* cfg) {
     memset(cfg, 0, sizeof(*cfg));
     cfg->server_port = 8888;
     snprintf(cfg->default_privacy, sizeof(cfg->default_privacy), "UNLISTED");
-    cfg->auto_upload = 1;
+    cfg->auto_upload = 0;
 
     pthread_mutex_lock(&s_config_mutex);
 
