@@ -30,9 +30,24 @@ if command -v ruby &>/dev/null; then
     }
 fi
 
-# Check required triggers
-grep -q "workflow_dispatch" "${WORKFLOW_FILE}" || {
+# Check required triggers and inputs
+grep -q "workflow_dispatch:" "${WORKFLOW_FILE}" || {
     echo "FAIL: workflow_dispatch trigger missing from ${WORKFLOW_FILE}" >&2
+    exit 1
+}
+
+grep -q "tag:" "${WORKFLOW_FILE}" || {
+    echo "FAIL: workflow_dispatch tag input missing from ${WORKFLOW_FILE}" >&2
+    exit 1
+}
+
+grep -q "release_tag" "${WORKFLOW_FILE}" || {
+    echo "FAIL: release_tag output resolution step missing from ${WORKFLOW_FILE}" >&2
+    exit 1
+}
+
+grep -q "git pull --rebase origin main" "${WORKFLOW_FILE}" || {
+    echo "FAIL: git pull --rebase origin main missing from ${WORKFLOW_FILE}" >&2
     exit 1
 }
 
@@ -171,6 +186,18 @@ if git diff-index --quiet HEAD --; then
 else
     echo "[Test 4] Dirty working tree rejection already confirmed above in Test 3."
 fi
+
+# -------------------------------------------------------------
+# Test 5: Validate non-interactive execution requires -y/--yes
+# -------------------------------------------------------------
+echo "[Test 5] Testing non-interactive execution safety check..."
+
+NON_INT_ERR=$(echo "" | bash "${RELEASE_SCRIPT}" 2>&1 || true)
+echo "${NON_INT_ERR}" | grep -q "Error: Non-interactive execution requires -y or --yes flag" || {
+    echo "FAIL: release.sh did not require -y flag when executed without a TTY" >&2
+    exit 1
+}
+echo "  -> Non-interactive execution correctly requires -y or --yes flag."
 
 echo "=========================================================="
 echo "All Release Workflow & Script Validation Tests Passed Successfully!"

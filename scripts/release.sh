@@ -67,6 +67,12 @@ if [ "${DRY_RUN}" = true ]; then
     echo ">> RUNNING IN DRY-RUN MODE (no git tags will be created or pushed)"
 fi
 
+# In non-dry-run mode, require -y/--yes when stdin is not a TTY
+if [ "${DRY_RUN}" = false ] && [ ! -t 0 ] && [ "${ASSUME_YES}" = false ]; then
+    echo "Error: Non-interactive execution requires -y or --yes flag" >&2
+    exit 1
+fi
+
 # Step 1: Check for clean working tree
 if [ "${ALLOW_DIRTY}" = false ]; then
     echo "==> Step 1: Verifying clean working tree..."
@@ -151,11 +157,18 @@ if [ "${DRY_RUN}" = true ]; then
     exit 0
 fi
 
-# Non-dry-run: prompt for confirmation if interactive
-if [ -t 0 ] && [ "${ASSUME_YES}" = false ]; then
-    read -r -p "Create annotated tag ${TAG} and push to origin? [y/N] " CONFIRM
-    if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
-        echo "Release aborted by user."
+# Non-dry-run: prompt for confirmation if interactive, or require -y/--yes if non-interactive
+if [ -t 0 ]; then
+    if [ "${ASSUME_YES}" = false ]; then
+        read -r -p "Create annotated tag ${TAG} and push to origin? [y/N] " CONFIRM
+        if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
+            echo "Release aborted by user."
+            exit 1
+        fi
+    fi
+else
+    if [ "${ASSUME_YES}" = false ]; then
+        echo "Error: Non-interactive execution requires -y or --yes flag" >&2
         exit 1
     fi
 fi
