@@ -9,3 +9,9 @@ bin/
 docs/superpowers
 __pycache__/
 *.pyc
+.opencode
+.gemini
+.codex
+.claude
+.agents
+.agent
