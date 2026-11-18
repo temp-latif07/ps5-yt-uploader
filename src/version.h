@@ -2,7 +2,7 @@
 #define VERSION_H
 
 #define APP_NAME "ps5-yt-uploader"
-#define APP_VERSION "1.0.4"
+#define APP_VERSION "1.0.5"
 #define APP_DISPLAY_NAME "PS5 YouTube Uploader"
 
 #endif /* VERSION_H */

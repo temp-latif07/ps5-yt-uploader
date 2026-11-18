@@ -10,6 +10,23 @@ Planned improvements and upcoming fixes for subsequent releases.
 
 ---
 
+## 1.0.5
+
+Linker script resolution, 16 KB page alignment, emulated TLS, and robust host process execution for PlayStation 5.
+
+**Fixes**
+- **Linker Script & Dynamic Linker Relocation Fix (`elf_x86_64.x`):** Resolved the critical issue where the ELF payload crashed immediately on execution before reaching `main()`. Linking with the authentic PS5 linker script defines `__image_start`, `__image_end`, and `_DYNAMIC` in the binary symbol table. Previously, missing symbols caused `_DYNAMIC` to resolve to `0x0`, leading to an immediate NULL-pointer dereference in the embedded `rtld` dynamic loader (`rtld_payload.c`).
+- **16 KB PS5 Page Alignment (`-z max-page-size=0x4000`):** Enforced 16 KB segment alignment matching PS5 Prospero virtual memory requirements, preventing mapping conflicts when loaded by `elfldr`.
+- **Emulated Thread-Local Storage (`-femulated-tls`):** Added emulated TLS compiler and linker flags (`-mllvm -emulated-tls`) to eliminate TLS relocation traps in multi-threaded subsystems.
+- **Host Process CLI Argument Tolerance:** When launched into background daemons (such as `SceSpZeroConf`), arbitrary host process command line arguments are now gracefully tolerated with a diagnostic warning rather than triggering CLI parsing errors.
+- **Fallback Data Directory:** Added runtime fallback to `/tmp/youtube_uploader` if the primary `/data` partition is permission-restricted.
+- **User Service Initialization:** Initialized `sceUserService` before launching the native browser from home screen tile events.
+
+**Behind the scenes**
+- **Vendored Linker Script (`vendor/ps5-sdk/ldscripts/`):** Added the official PlayStation 5 LLVM linker script to the repository for fully reproducible, single-command cross-compilation.
+
+---
+
 ## 1.0.4
 
 Automatic PS5 home screen tile installation, instant browser launch, and authentic PS5 Payload SDK toolchain integration.

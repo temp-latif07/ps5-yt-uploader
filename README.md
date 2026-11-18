@@ -1,7 +1,7 @@
 # PS5 YouTube Uploader (`ps5-yt-uploader`)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Release](https://img.shields.io/badge/release-v1.0.4-blue.svg)](https://github.com/temp-latif07/ps5-yt-uploader/releases)
+[![Release](https://img.shields.io/badge/release-v1.0.5-blue.svg)](https://github.com/temp-latif07/ps5-yt-uploader/releases)
 [![Platform](https://img.shields.io/badge/platform-PlayStation%205-003791.svg)]()
 [![Target Firmware](https://img.shields.io/badge/firmware-12.20%20%7C%20y2JB%20Relapse-792ee5.svg)]()
 [![Payload Manager](https://img.shields.io/badge/Payload%20Manager-Compatible-2ea44f.svg)](payloads.json)
@@ -157,7 +157,7 @@ ELF payloads run headless in the background. To create a dedicated home screen s
 For testing, host simulation, or custom automation, `ps5-yt-uploader` supports command-line parameters:
 
 ```text
-ps5-yt-uploader v1.0.4 (PS5 YouTube Uploader)
+ps5-yt-uploader v1.0.5 (PS5 YouTube Uploader)
 Usage: ps5-youtube [options]
 
 Options:

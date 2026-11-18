@@ -22,6 +22,7 @@ int sceAppInstUtilInitialize(void);
 int sceAppInstUtilTerminate(void);
 int sceAppInstUtilAppInstallTitleDir(const char* title_id, const char* dir, void* reserved);
 int sceAppInstUtilAppInstallAll(void* reserved);
+int sceUserServiceInitialize(void* reserved);
 int sceSystemServiceLaunchWebBrowser(const char* uri, void* reserved);
 
 static int ps5_mkdir_p(const char* path, mode_t mode) {
@@ -160,6 +161,7 @@ int media_tile_launch_browser(const char* launch_url) {
         return -1;
     }
     printf("[TILE] Launching PS5 browser: %s\n", launch_url);
+    sceUserServiceInitialize(NULL);
     int rc = sceSystemServiceLaunchWebBrowser(launch_url, NULL);
     if (rc != 0) {
         printf("[TILE] Failed to launch PS5 browser (error: 0x%08x)\n", rc);

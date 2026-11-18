@@ -81,9 +81,13 @@ int main(int argc, char* argv[]) {
             print_usage(argv[0]);
             return 0;
         } else {
+#ifndef PS5
             fprintf(stderr, "Unknown or incomplete option: %s\n", argv[i]);
             print_usage(argv[0]);
             return 1;
+#else
+            fprintf(stderr, "Warning: Ignoring unknown option on PS5: %s\n", argv[i]);
+#endif
         }
     }
 
@@ -97,8 +101,11 @@ int main(int argc, char* argv[]) {
 
     // 1. config_init(data_dir): Ensure directory exists with 0777 and load config.json
     if (config_init(data_dir) != 0) {
-        fprintf(stderr, "Error: Failed to initialize config in '%s'\n", data_dir);
-        return 1;
+        fprintf(stderr, "Warning: Failed to initialize config in '%s', falling back to /tmp/youtube_uploader\n", data_dir);
+        data_dir = "/tmp/youtube_uploader";
+        if (config_init(data_dir) != 0) {
+            fprintf(stderr, "Error: Failed to initialize fallback config directory '%s'\n", data_dir);
+        }
     }
 
     app_config_t cfg;

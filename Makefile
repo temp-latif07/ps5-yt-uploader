@@ -8,7 +8,7 @@ LLVM_DIR := $(if $(LLD_PATH),$(dir $(LLD_PATH)),)
 CLANG_PS5 ?= $(if $(wildcard $(LLVM_DIR)clang),$(LLVM_DIR)clang,clang)
 LLVM_STRIP ?= $(if $(wildcard $(LLVM_DIR)llvm-strip),$(LLVM_DIR)llvm-strip,$(shell (which llvm-strip 2>/dev/null || which strip 2>/dev/null) | head -n 1))
 
-PS5_CFLAGS ?= -target x86_64-sie-ps5 -O2 -fPIC -DPS5 -I./include -I./src -I./vendor -isystem vendor/ps5-sdk/include/freebsd -isystem vendor/ps5-sdk/include -Wno-unreachable-code-generic-assoc -include sys/time.h -include unistd.h
+PS5_CFLAGS ?= -target x86_64-sie-ps5 -O2 -fPIC -DPS5 -fno-stack-protector -fno-plt -femulated-tls -I./include -I./src -I./vendor -isystem vendor/ps5-sdk/include/freebsd -isystem vendor/ps5-sdk/include -Wno-unreachable-code-generic-assoc -include sys/time.h -include unistd.h
 
 PS5_LDFLAGS ?=
 ifneq ($(LLD_PATH),)
@@ -34,6 +34,9 @@ $(SRC_DIR)/web_assets.h: web/index.html web/style.css web/app.js scripts/bundle_
 
 shortcut_assets: $(SRC_DIR)/shortcut_assets.h
 
+dist/shortcut/PS5YT0001/sce_sys/param.json dist/shortcut/PS5YT0001/sce_sys/icon0.png: scripts/generate_shortcut.py
+	python3 scripts/generate_shortcut.py
+
 $(SRC_DIR)/shortcut_assets.h: dist/shortcut/PS5YT0001/sce_sys/param.json dist/shortcut/PS5YT0001/sce_sys/icon0.png scripts/bundle_shortcut.py
 	python3 scripts/bundle_shortcut.py
 
@@ -58,7 +61,9 @@ ps5: $(BIN_DIR) $(SRC_DIR)/web_assets.h $(SRC_DIR)/shortcut_assets.h $(PS5_OBJS)
 		echo "Error: ld.lld is required for PS5 ELF cross-compilation. Please install lld (e.g. brew install lld)." >&2; \
 		exit 1; \
 	fi
-	$(LLD_PATH) -pie vendor/ps5-sdk/lib/crt1.o $(PS5_OBJS) \
+	$(LLD_PATH) -pie -T vendor/ps5-sdk/ldscripts/elf_x86_64.x \
+		-z max-page-size=0x4000 --eh-frame-hdr -mllvm -emulated-tls --hash-style=gnu \
+		vendor/ps5-sdk/lib/crt1.o $(PS5_OBJS) \
 		-Lvendor/ps5-sdk/lib -lc -lkernel -lSceLibcInternal -lSceAppInstUtil \
 		-lSceSystemService -lSceUserService -lSceNetCtl -lSceHttp -lSceSsl -lSceNet \
 		-o $(BIN_DIR)/ps5-yt-uploader.elf
