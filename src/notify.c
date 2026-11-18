@@ -1,10 +1,15 @@
 #include "notify.h"
 #include <stdio.h>
+#include <string.h>
 #include <pthread.h>
 
 #ifdef PS5
-// PS5 notification request definition
-int sceNotificationRequest(const char* message);
+typedef struct {
+    char useless1[45];
+    char message[3075];
+} notify_request_t;
+
+int sceKernelSendNotificationRequest(int device, notify_request_t* req, size_t size, int blocking);
 #endif
 
 static notify_spy_fn s_notify_spy = NULL;
@@ -22,7 +27,10 @@ void notify_send(const char* message) {
     }
 
 #ifdef PS5
-    sceNotificationRequest(message);
+    notify_request_t req;
+    memset(&req, 0, sizeof(req));
+    snprintf(req.message, sizeof(req.message), "%s", message);
+    sceKernelSendNotificationRequest(0, &req, sizeof(req), 0);
 #endif
 
     printf("[NOTIFY] %s\n", message);

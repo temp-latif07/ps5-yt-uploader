@@ -9,7 +9,7 @@ typedef void (*notify_spy_fn)(const char* message);
 
 /**
  * Send a user notification toast.
- * On PS5 (#ifdef PS5): Dispatches via sceNotificationRequest.
+ * On PS5 (#ifdef PS5): Dispatches via sceKernelSendNotificationRequest.
  * On Host (macOS/Linux): Formats log to stdout and calls registered spy if present.
  *
  * @param message Notification text to display
