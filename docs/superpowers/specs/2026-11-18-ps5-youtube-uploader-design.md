@@ -3,32 +3,32 @@
 ## 1. Intent and The Why
 On retail PlayStation 5 consoles, uploading gameplay clips to YouTube relies on the DualSense "Create" button, the system Media Gallery, and active PlayStation Network (PSN) authentication. On a jailbroken PS5 (firmware 12.20 utilizing the y2JB Relapse exploit chain), the console is deliberately disconnected and blocked from PSN (via `nanoDNS`) to prevent telemetry and forced system updates. Consequently, invoking the stock share option fails with *"You're not signed in"*.
 
-Currently, users must manually copy video clips to an external PC (via FTP, web file managers, or USB) and manually upload them to YouTube. 
+Currently, users must manually copy video clips to an external PC (via FTP, web file managers, or USB) and manually upload them to YouTube.
 
-The goal of this project is to build an open-source, production-ready, native solution for the jailbroken PS5 community that restores the ability to upload gameplay captures directly from the console's internal SSD to a user's personal YouTube channel, feeling as close to the native stock experience as possible while requiring zero intermediate PC transfers.
+The goal of this project is to build an open-source, production-ready, native solution for the jailbroken PS5 community that packages everything into **a single unified, all-in-one payload** (`ps5-youtube.elf`). It restores the ability to upload gameplay captures directly from the console's internal SSD to a user's personal YouTube channel, feeling as close to the native stock experience as possible: a single file to install, a dedicated home screen Media tile, on-screen notifications, zero Google Cloud developer accounts, zero credit cards, and zero upload quotas.
 
 ---
 
 ## 2. Goals, Non-Goals, and Anti-Goals
 
 ### Goals
-- **Direct Console-to-YouTube Uploads:** Stream video captures directly from the PS5 internal storage (`/user/av_content/video/`) to YouTube over the console's network interface.
-- **User-Specific Account Binding:** Authenticate users directly to their own YouTube accounts using the Google OAuth 2.0 Device Authorization Grant (RFC 8628 - `google.com/device`).
-- **Phased MVP Delivery:**
-  - **Phase 1 (MVP):** Fork [StonedModder/PShare](https://github.com/StonedModder/PShare) to introduce a native YouTube destination with automated detection and on-screen PS5 notification toasts.
-  - **Phase 2 (Stock Feel):** Add a dedicated launcher tile in the PS5 home screen's **Media** category (using the `browser_patch` technique from `owendswang/ps5-web-file-manager`) that opens in 1080p fullscreen.
-  - **Phase 3 (Companion & Polish):** Deliver a responsive local web companion accessible from any phone or PC on the same Wi-Fi network for clip management, custom metadata editing (title, description, tags, privacy), and upload queue status.
-- **Production Readiness & Community Distribution:** Provide robust error handling, resumable upload recovery (handling transient Wi-Fi drops), token refresh persistence in `/data/`, and clean configuration management.
+- **Single All-in-One Payload (`ps5-youtube.elf`):** Everything compiled into one self-contained ELF binary (no managing multiple disjointed payloads or companion dependencies).
+- **Direct Console-to-YouTube Uploads:** Stream video captures directly from the PS5 internal storage (`/user/av_content/video/`) to YouTube over the console's network interface using YouTube Studio's internal Scotty resumable upload protocol.
+- **Zero Google Cloud Accounts & Zero Credit Cards:** Authenticate without Google Cloud Console, API keys, or billing accounts, completely avoiding the 10,000-unit daily API quota limit.
+- **Native PS5 Home Screen Integration:** Automatically register a dedicated launcher tile in the PS5 home screen's **Media** category (via embedded `browser_patch`) that opens in 1080p fullscreen.
+- **Autonomous Background Uploads & TV Notifications:** Background thread catches newly saved gameplay clips, uploads them directly from SSD, and fires native PS5 system notification toasts (`sceNotificationRequest`).
+- **Flexible UI Access:** Access the dashboard directly on the TV screen via DualSense controller, or from any phone/PC browser on local Wi-Fi (`http://<ps5-ip>:8888`).
 
 ### Non-Goals
 - **In-Game Overlay Injection:** No direct hooking of Sony's closed-source `shellcore` Share dialog in memory while games are rendering (which risks game crashes, memory corruption, and firmware instability).
 - **Video Re-encoding / Transcoding on Console:** Video clips recorded by the PS5 are already properly encoded H.264/HEVC MP4 files. The uploader will not transcode or alter video streams on-device.
-- **Bypassing YouTube Platform Limits:** The tool will not circumvent YouTube's standard platform policies (e.g., maximum daily upload limits for new accounts, copyright ID matching).
+- **Multiple Disjointed Tools:** The user will not be forced to install or run multiple background daemons.
 
 ### Anti-Goals
-- **No Shared Monolithic Quota Bottlenecks:** The solution must not hardcode a single shared public API key that gets exhausted immediately by community usage. It must support user-supplied API credentials or verified project scopes.
-- **No Heavy Background Overhead:** The daemon must consume negligible CPU and RAM when idle, avoiding interference with 60/120 FPS gameplay.
-- **No Intermediary Cloud Relays:** Media bytes must never pass through third-party servers; uploads route strictly from `PS5 -> Google API`.
+- **No Shared Monolithic Quota Bottlenecks:** No dependency on public Google Cloud API quotas.
+- **No Credit Cards or Developer Portal Setup:** Users and community members never need to register as developers or attach payment methods.
+- **No Heavy Background Overhead:** The daemon must consume negligible CPU (< 0.1%) and RAM (< 4 MB) when idle, avoiding interference with 60/120 FPS gameplay.
+- **No Intermediary Cloud Relays:** Media bytes stream strictly from `PS5 SSD -> YouTube Upload Servers`.
 
 ---
 
@@ -64,50 +64,49 @@ The goal of this project is to build an open-source, production-ready, native so
 
 ---
 
-## 5. Architectural Specification & Roadmap
+## 5. Architectural Specification: The Single Unified Payload (`ps5-youtube.elf`)
 
 ```
-                                  +---------------------------------------+
-                                  |     PS5 DualSense "Create" Button     |
-                                  +---------------------------------------+
-                                                      |
-                                           (Captures gameplay clip)
-                                                      v
-                                  +---------------------------------------+
-                                  |     /user/av_content/video/<GameID>/  |
-                                  +---------------------------------------+
-                                                      |
-                                            (inotify / stat poll)
-                                                      v
-  +-----------------------------------------------------------------------------------------------+
-  | PS5 Background Daemon (Extracted lightweight pshared core, < 600KB)                           |
-  |                                                                                               |
-  |  +---------------------------+    +----------------------------+    +-----------------------+ |
-  |  |   Capture Watcher Engine  |--->|   Scotty / Studio Engine   |--->|   PS5 Notification    | |
-  |  |  (Detects & verifies file |    |  - Streams to Scotty       |    |  (sceNotification     | |
-  |  |   write completion)       |    |  - Finalizes createvideo   |    |   On-Screen Toasts)   | |
-  |  +---------------------------+    +----------------------------+    +-----------------------+ |
-  |                                                 ^                                             |
-  |                                                 | (Session / Cookies)                         |
-  |                                                 v                                             |
-  |                                   +----------------------------+                              |
-  |                                   | /data/pshare/youtube.json  |                              |
-  |                                   +----------------------------+                              |
-  |                                                 ^                                             |
-  |                                                 | (1-Click Local LAN API)                     |
-  |  +----------------------------------------------v------------------------------------------+  |
-  |  | Embedded Web Companion Server (port 8888)                                               |  |
-  |  +-----------------------------------------------------------------------------------------+  |
-  +-----------------------------------------------------------------------------------------------+
-           |                                                                   |
-           v (Local WebKit Browser)                                            v (Local Wi-Fi)
-+-----------------------------+                                     +-----------------------------+
-| PS5 Media Home Screen Tile  |                                     | Mobile / PC Browser         |
-| - 1080p Fullscreen Gallery  |                                     | - Scans QR code from TV     |
-| - QR Code Pairing Screen    |                                     | - 1-Click Session Connect   |
-| - Upload Queue & Status     |                                     | - No dev accounts or cards  |
-+-----------------------------+                                     +-----------------------------+
+=================================================================================================
+                               ps5-youtube.elf (Single Unified Payload)
+=================================================================================================
+  
+  [ Subsystem 1: Media Tile & Browser Patch Engine ]
+    - Injects home screen launcher icon directly into the PS5 "Media" category (Title: YouTube Uploader)
+    - Fullscreen 1080p WebKit browser launcher (DualSense controller navigation)
+    - Auto-registers on boot / payload launch
+
+  [ Subsystem 2: Embedded Web Server & Dashboard (Port 8888) ]
+    - Embedded lightweight HTTP server (serving responsive TV + mobile web dashboard)
+    - Local clip gallery viewer with thumbnails, timestamps, and duration from /user/av_content/video/
+    - Interactive clip curation modal: Edit title, description, tags, and privacy (Public/Unlisted/Private)
+    - Pairing wizard: Dynamic QR code for 10-second phone session sync
+
+  [ Subsystem 3: Capture Watcher & Autonomous Upload Daemon ]
+    - Monitors /user/av_content/video/<GameID>/ for new clips saved via DualSense Create button
+    - Autonomous resumable streaming from PS5 SSD -> YouTube Upload Servers (Scotty protocol)
+    - Signs requests using internal SAPISIDHASH + sessionToken (proven in Spike B)
+    - Emits native on-screen PS5 notification popups:
+        * "YouTube: Uploading clip..."
+        * "YouTube: Upload complete! (youtu.be/xxx)"
+
+  [ Subsystem 4: Local Storage & Session Maintenance ]
+    - Path: /data/youtube_uploader/config.json
+    - Stores authenticated YouTube session and user preferences
+    - Background keep-alive heartbeat to prevent session expiration
+=================================================================================================
+                                  |                             |
+                                  v                             v
+                    +---------------------------+ +---------------------------+
+                    | PS5 TV Screen             | | Mobile / PC Browser       |
+                    | (1080p Fullscreen Tile)   | | (http://<ps5-ip>:8888)    |
+                    +---------------------------+ +---------------------------+
 ```
+
+### Single-File Deployment Model
+* **File:** `ps5-youtube.elf` (compiled using `PS5_PAYLOAD_SDK`).
+* **Installation:** Transferred via `ps5upload` or sent to port 9021 (`elfldr`). Once dropped in the console's autoloader directory (alongside `kstuff-lite`), it boots automatically with the jailbreak.
+* **Zero Dependencies:** No external Python runtimes, no secondary payload chains, no cloud middleman. Everything is compiled into one native C/C++ binary (< 700 KB).
 
 ### Key Architectural Decisions
 1. **Zero Google Cloud & Zero Card Requirements:** The uploader operates via YouTube Studio's internal Scotty and InnerTube protocols, validated in Spike B (`https://youtu.be/6_ZUsDALKh0`). It completely frees users from Google Cloud projects, Client IDs, credit card attachments, and the 10,000-unit API quota limit.
