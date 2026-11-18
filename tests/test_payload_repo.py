@@ -64,7 +64,7 @@ class TestPayloadRepoGenerator(unittest.TestCase):
         catalog = update_payload_catalog(
             elf_path=self.test_elf,
             version="v1.0.0",
-            url="https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.0/ps5-youtube.elf",
+            url="https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.0/ps5-yt-uploader.elf",
             output_path=self.output_json,
         )
 
@@ -80,10 +80,10 @@ class TestPayloadRepoGenerator(unittest.TestCase):
         item = catalog["payloads"][0]
         self.assertEqual(item["id"], "ps5-yt-uploader")
         self.assertEqual(item["name"], "PS5 YouTube Uploader")
-        self.assertEqual(item["filename"], "ps5-youtube.elf")
+        self.assertEqual(item["filename"], "ps5-yt-uploader.elf")
         self.assertEqual(
             item["url"],
-            "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.0/ps5-youtube.elf",
+            "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.0/ps5-yt-uploader.elf",
         )
         self.assertEqual(item["version"], "v1.0.0")
         self.assertEqual(item["category"], "Utilities")
@@ -126,8 +126,8 @@ class TestPayloadRepoGenerator(unittest.TestCase):
                 {
                     "id": "ps5-yt-uploader",
                     "name": "PS5 YouTube Uploader",
-                    "filename": "ps5-youtube.elf",
-                    "url": "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v0.9.0/ps5-youtube.elf",
+                    "filename": "ps5-yt-uploader.elf",
+                    "url": "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v0.9.0/ps5-yt-uploader.elf",
                     "description": "Older version",
                     "version": "v0.9.0",
                     "last_update": "2026-01-01",
@@ -145,7 +145,7 @@ class TestPayloadRepoGenerator(unittest.TestCase):
         catalog = update_payload_catalog(
             elf_path=self.test_elf,
             version="v1.0.0",
-            url="https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.0/ps5-youtube.elf",
+            url="https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.0/ps5-yt-uploader.elf",
             output_path=self.output_json,
         )
 
@@ -170,7 +170,7 @@ class TestPayloadRepoGenerator(unittest.TestCase):
         catalog2 = update_payload_catalog(
             elf_path=self.test_elf,
             version="v1.0.0",
-            url="https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.0/ps5-youtube.elf",
+            url="https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.0/ps5-yt-uploader.elf",
             output_path=self.output_json,
         )
         self.assertEqual(len(catalog2["payloads"]), 2)
@@ -211,8 +211,8 @@ class TestPayloadRepoGenerator(unittest.TestCase):
         valid_entry = {
             "id": "ps5-yt-uploader",
             "name": "PS5 YouTube Uploader",
-            "filename": "ps5-youtube.elf",
-            "url": "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.0/ps5-youtube.elf",
+            "filename": "ps5-yt-uploader.elf",
+            "url": "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.0/ps5-yt-uploader.elf",
             "version": "v1.0.0",
             "category": "Utilities",
             "checksum": "c" * 64,
@@ -295,7 +295,7 @@ class TestPayloadRepoGenerator(unittest.TestCase):
             "--version",
             "v1.0.0",
             "--url",
-            "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.0/ps5-youtube.elf",
+            "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v1.0.0/ps5-yt-uploader.elf",
             "--output",
             self.output_json,
         ]
@@ -317,10 +317,10 @@ class TestPayloadRepoGenerator(unittest.TestCase):
             self.assertTrue(validate_repo_catalog(root_catalog))
             ps5_item = next(p for p in root_catalog["payloads"] if p["id"] == "ps5-yt-uploader")
             self.assertEqual(ps5_item["name"], "PS5 YouTube Uploader")
-            self.assertEqual(ps5_item["filename"], "ps5-youtube.elf")
+            self.assertEqual(ps5_item["filename"], "ps5-yt-uploader.elf")
             self.assertEqual(ps5_item["author"], "Latif Muhammad")
 
-            bin_elf = os.path.join(REPO_ROOT, "bin", "ps5-youtube.elf")
+            bin_elf = os.path.join(REPO_ROOT, "bin", "ps5-yt-uploader.elf")
             if os.path.exists(bin_elf):
                 self.assertEqual(ps5_item["checksum"], compute_sha256(bin_elf))
 

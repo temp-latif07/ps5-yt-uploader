@@ -7,3 +7,5 @@ cookies.txt
 bin/
 *.o
 docs/superpowers
+__pycache__/
+*.pyc

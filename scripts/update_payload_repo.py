@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 DEFAULT_REPO_NAME = "PS5 YouTube Uploader"
 DEFAULT_PAYLOAD_ID = "ps5-yt-uploader"
 DEFAULT_PAYLOAD_NAME = "PS5 YouTube Uploader"
-DEFAULT_FILENAME = "ps5-youtube.elf"
+DEFAULT_FILENAME = "ps5-yt-uploader.elf"
 DEFAULT_CATEGORY = "Utilities"
 DEFAULT_AUTHOR = "Latif Muhammad"
 DEFAULT_SOURCE = "https://github.com/temp-latif07/ps5-yt-uploader"
@@ -257,8 +257,8 @@ def main() -> int:
     parser.add_argument(
         "--elf",
         dest="elf",
-        default="bin/ps5-youtube.elf",
-        help="Path to compiled ELF binary (default: bin/ps5-youtube.elf)",
+        default="bin/ps5-yt-uploader.elf",
+        help="Path to compiled ELF binary (default: bin/ps5-yt-uploader.elf)",
     )
     parser.add_argument(
         "--url",

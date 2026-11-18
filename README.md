@@ -25,7 +25,7 @@ On jailbroken PS5 setups, PlayStation Network (PSN) telemetry and communication 
 |                 |                                                |                    |
 |                 v (inotify / polling watcher)                    v                    |
 |   +-------------+------------------------------------------------+----------------+   |
-|   |                   ps5-youtube.elf (Single Unified Daemon)                     |   |
+|   |                   ps5-yt-uploader.elf (Single Unified Daemon)                 |   |
 |   |                                                                               |   |
 |   |  - Background Capture Watcher       - YouTube Studio Scotty Upload Engine     |   |
 |   |  - Native PS5 Toast Notifications   - Embedded Web Companion Server (:8888)   |   |
@@ -82,7 +82,7 @@ The easiest and cleanest installation method is using `itsPLK/ps5-payload-manage
 5. Select **PS5 YouTube Uploader** and choose **Install**.
 6. *(Optional but recommended)* Toggle **Autoload** to automatically run the uploader daemon every time your PS5 boots or payloads are loaded.
 
-Payload Manager will automatically download `ps5-youtube.elf`, verify its SHA-256 checksum, place it in `/data/payloads/ps5-youtube.elf`, and launch it.
+Payload Manager will automatically download `ps5-yt-uploader.elf`, verify its SHA-256 checksum, place it in `/data/payloads/ps5-yt-uploader.elf`, and launch it.
 
 ---
 
@@ -90,11 +90,11 @@ Payload Manager will automatically download `ps5-youtube.elf`, verify its SHA-25
 
 If you prefer launching payloads manually using standard ELF loaders (listening on port `9021`):
 
-1. Download the latest `ps5-youtube.elf` from the [GitHub Releases](https://github.com/temp-latif07/ps5-yt-uploader/releases) page.
+1. Download the latest `ps5-yt-uploader.elf` from the [GitHub Releases](https://github.com/temp-latif07/ps5-yt-uploader/releases) page.
 2. Ensure your PS5 homebrew ELF loader is running on port `9021`.
 3. Send the ELF binary to your console from your computer terminal:
    ```bash
-   nc -w 3 <ps5-ip> 9021 < bin/ps5-youtube.elf
+   nc -w 3 <ps5-ip> 9021 < bin/ps5-yt-uploader.elf
    ```
    *(Replace `<ps5-ip>` with the actual local IP address of your PS5, e.g., `192.168.1.150`.)*
 4. Check your TV screen: you will receive a notification toast indicating that PS5 YouTube Uploader is running and listening on port `8888`.
@@ -162,7 +162,7 @@ make
 Cross-compile the production ELF binary targeting the PS5 FreeBSD 12 kernel environment:
 
 ```bash
-# Cross-compiles to bin/ps5-youtube.elf and strips symbols
+# Cross-compiles to bin/ps5-yt-uploader.elf and strips symbols
 make ps5
 ```
 

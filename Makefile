@@ -24,7 +24,7 @@ TESTS_DIR := tests
 
 all: test $(BIN_DIR)/ps5-youtube-host
 
-test: test_version test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile test_e2e
+test: test_version test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile test_e2e test_payload_repo
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
@@ -38,9 +38,10 @@ $(BIN_DIR)/ps5-youtube-host: $(BIN_DIR) $(SRC_DIR)/web_assets.h $(wildcard $(SRC
 	$(CC) $(CFLAGS) $(filter %.c, $^) -o $@ $(LDFLAGS)
 
 ps5: $(BIN_DIR) $(SRC_DIR)/web_assets.h $(wildcard $(SRC_DIR)/*.c) $(VENDOR_DIR)/cJSON.c
-	$(CC) $(PS5_CFLAGS) $(wildcard $(SRC_DIR)/*.c) $(VENDOR_DIR)/cJSON.c -o $(BIN_DIR)/ps5-youtube.elf $(PS5_LDFLAGS)
-	@if [ -n "$(LLVM_STRIP)" ]; then $(LLVM_STRIP) $(BIN_DIR)/ps5-youtube.elf 2>/dev/null || true; fi
-	@echo "Built $(BIN_DIR)/ps5-youtube.elf size: $$(ls -lh $(BIN_DIR)/ps5-youtube.elf | awk '{print $$5}')"
+	$(CC) $(PS5_CFLAGS) $(wildcard $(SRC_DIR)/*.c) $(VENDOR_DIR)/cJSON.c -o $(BIN_DIR)/ps5-yt-uploader.elf $(PS5_LDFLAGS)
+	@if [ -n "$(LLVM_STRIP)" ]; then $(LLVM_STRIP) $(BIN_DIR)/ps5-yt-uploader.elf 2>/dev/null || true; fi
+	@ln -sf ps5-yt-uploader.elf $(BIN_DIR)/ps5-youtube.elf
+	@echo "Built $(BIN_DIR)/ps5-yt-uploader.elf size: $$(ls -lh $(BIN_DIR)/ps5-yt-uploader.elf | awk '{print $$5}')"
 
 $(BIN_DIR)/test_version: $(TESTS_DIR)/test_version_cli.c
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
@@ -96,7 +97,13 @@ test_media_tile: $(BIN_DIR) $(BIN_DIR)/test_media_tile
 test_e2e: $(BIN_DIR)/ps5-youtube-host
 	bash tests/test_e2e_integration.sh
 
+test_payload_repo:
+	python3 tests/test_payload_repo.py
+
+release:
+	bash scripts/release.sh
+
 clean:
 	rm -rf $(BIN_DIR)
 
-.PHONY: all test test_version test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile test_e2e ps5 web_assets clean
+.PHONY: all test test_version test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile test_e2e test_payload_repo release ps5 web_assets clean

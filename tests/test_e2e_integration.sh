@@ -202,23 +202,23 @@ echo "  -> ps5-youtube-host exited cleanly with status 0!"
 
 echo "=== Step 8: Verifying PS5 Cross-Compilation & Binary Size ==="
 make ps5
-if [ ! -f "bin/ps5-youtube.elf" ]; then
-    echo "FAIL: bin/ps5-youtube.elf was not created by make ps5"
+if [ ! -f "bin/ps5-yt-uploader.elf" ]; then
+    echo "FAIL: bin/ps5-yt-uploader.elf was not created by make ps5"
     exit 1
 fi
 
-ELF_INFO=$(file bin/ps5-youtube.elf)
+ELF_INFO=$(file bin/ps5-yt-uploader.elf)
 echo "  -> ELF Info: $ELF_INFO"
 if ! echo "$ELF_INFO" | grep -qi "ELF 64-bit"; then
-    echo "FAIL: bin/ps5-youtube.elf is not an ELF 64-bit binary"
+    echo "FAIL: bin/ps5-yt-uploader.elf is not an ELF 64-bit binary"
     exit 1
 fi
 
-ELF_SIZE=$(stat -f "%z" bin/ps5-youtube.elf 2>/dev/null || stat -c "%s" bin/ps5-youtube.elf 2>/dev/null)
+ELF_SIZE=$(stat -f "%z" bin/ps5-yt-uploader.elf 2>/dev/null || stat -c "%s" bin/ps5-yt-uploader.elf 2>/dev/null)
 echo "  -> Final Payload Size: $ELF_SIZE bytes"
 MAX_SIZE=716800 # 700 KB in bytes
 if [ "$ELF_SIZE" -ge "$MAX_SIZE" ]; then
-    echo "FAIL: bin/ps5-youtube.elf ($ELF_SIZE bytes) exceeds 700 KB limit ($MAX_SIZE bytes)"
+    echo "FAIL: bin/ps5-yt-uploader.elf ($ELF_SIZE bytes) exceeds 700 KB limit ($MAX_SIZE bytes)"
     exit 1
 fi
 echo "  -> Payload size constraint passed ($ELF_SIZE < 716800 bytes)!"

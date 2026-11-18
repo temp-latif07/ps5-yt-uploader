@@ -1,0 +1,110 @@
+name: Release PS5 YouTube Uploader
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Set up LLVM Toolchain
+        run: |
+          if ! command -v ld.lld &>/dev/null; then
+            if [ -d "/opt/homebrew/opt/llvm/bin" ]; then
+              echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
+            elif [ -d "/usr/local/opt/llvm/bin" ]; then
+              echo "/usr/local/opt/llvm/bin" >> $GITHUB_PATH
+            else
+              brew install llvm
+              echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
+            fi
+          fi
+
+      - name: Run host test suite
+        run: |
+          make test
+
+      - name: Build PS5 payload ELF
+        run: |
+          make ps5
+
+      - name: Validate payload ELF binary
+        run: |
+          if [ ! -f "bin/ps5-yt-uploader.elf" ]; then
+            echo "Error: bin/ps5-yt-uploader.elf does not exist" >&2
+            exit 1
+          fi
+          ELF_INFO=$(file bin/ps5-yt-uploader.elf)
+          echo "ELF Info: $ELF_INFO"
+          if ! echo "$ELF_INFO" | grep -qi "ELF 64-bit"; then
+            echo "Error: bin/ps5-yt-uploader.elf is not an ELF 64-bit binary" >&2
+            exit 1
+          fi
+          SIZE=$(stat -f%z bin/ps5-yt-uploader.elf 2>/dev/null || stat -c%s bin/ps5-yt-uploader.elf)
+          MAX_SIZE=716800
+          if [ "$SIZE" -ge "$MAX_SIZE" ]; then
+            echo "Error: Payload size $SIZE bytes exceeds limit of $MAX_SIZE bytes (700 KB)" >&2
+            exit 1
+          fi
+          echo "Payload size check passed: $SIZE bytes (< $MAX_SIZE bytes)"
+
+      - name: Calculate SHA-256 checksum
+        run: |
+          shasum -a 256 bin/ps5-yt-uploader.elf > bin/ps5-yt-uploader.elf.sha256
+          cat bin/ps5-yt-uploader.elf.sha256
+
+      - name: Update payload repository catalog
+        run: |
+          python3 scripts/update_payload_repo.py \
+            --version ${{ github.ref_name }} \
+            --elf bin/ps5-yt-uploader.elf \
+            --url https://github.com/temp-latif07/ps5-yt-uploader/releases/download/${{ github.ref_name }}/ps5-yt-uploader.elf \
+            --output payloads.json
+
+      - name: Validate payload repository catalog
+        run: |
+          python3 tests/test_payload_repo.py
+
+      - name: Commit and push payloads.json to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp payloads.json /tmp/payloads.json.release
+          git fetch origin main:main || true
+          git checkout main
+          cp /tmp/payloads.json.release payloads.json
+          git add payloads.json
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(catalog): update payloads.json for ${{ github.ref_name }} [skip ci]"
+            git push origin main
+          else
+            echo "payloads.json unchanged, nothing to push"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }} - PS5 YouTube Uploader
+          files: |
+            bin/ps5-yt-uploader.elf
+            bin/ps5-yt-uploader.elf.sha256
+          generate_release_notes: true

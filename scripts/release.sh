@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# scripts/release.sh
+# Release coordination helper script for PS5 YouTube Uploader.
+# Verifies test suites, builds production PS5 payload ELF, checks size and hashes,
+# and pushes an annotated tag to trigger GitHub Actions release.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${REPO_ROOT}"
+
+DRY_RUN=false
+ASSUME_YES=false
+ALLOW_DIRTY=false
+
+print_usage() {
+    cat <<EOF
+Usage: scripts/release.sh [OPTIONS]
+
+Coordinates an official release of PS5 YouTube Uploader:
+1. Verifies a clean working tree.
+2. Extracts release version from src/version.h.
+3. Runs comprehensive test suite (make test).
+4. Cross-compiles production PS5 payload (make ps5).
+5. Validates payload binary size (< 700 KB) and SHA-256 hash.
+6. Creates annotated git tag v<version> and pushes to origin.
+
+Options:
+  --dry-run      Run all validation, tests, and build checks without tagging or pushing.
+  --allow-dirty  Allow uncommitted changes (useful for local development/testing).
+  -y, --yes      Non-interactive mode (automatically confirm tagging and pushing).
+  -h, --help     Show this help message and exit.
+EOF
+}
+
+# Parse command line options
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --allow-dirty)
+            ALLOW_DIRTY=true
+            shift
+            ;;
+        -y|--yes)
+            ASSUME_YES=true
+            shift
+            ;;
+        -h|--help)
+            print_usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            print_usage
+            exit 1
+            ;;
+    esac
+done
+
+echo "=========================================================="
+echo "      PS5 YouTube Uploader - Release Coordinator"
+echo "=========================================================="
+if [ "${DRY_RUN}" = true ]; then
+    echo ">> RUNNING IN DRY-RUN MODE (no git tags will be created or pushed)"
+fi
+
+# Step 1: Check for clean working tree
+if [ "${ALLOW_DIRTY}" = false ]; then
+    echo "==> Step 1: Verifying clean working tree..."
+    if ! git diff-index --quiet HEAD --; then
+        echo "Error: Working directory has uncommitted or staged changes to tracked files." >&2
+        echo "Please commit or stash your changes before creating a release." >&2
+        exit 1
+    fi
+    echo "  -> Working tree clean."
+else
+    echo "==> Step 1: Skipping clean tree verification (--allow-dirty set)..."
+fi
+
+# Step 2: Extract version from src/version.h
+echo "==> Step 2: Extracting version from src/version.h..."
+if [ ! -f "src/version.h" ]; then
+    echo "Error: src/version.h not found." >&2
+    exit 1
+fi
+
+VERSION=$(grep -E '#define\s+APP_VERSION\s+' src/version.h | sed -E 's/.*"([^"]+)".*/\1/')
+if [ -z "${VERSION}" ]; then
+    echo "Error: Unable to parse APP_VERSION constant from src/version.h" >&2
+    exit 1
+fi
+# Strip any leading 'v' if present to normalize
+VERSION="${VERSION#v}"
+TAG="v${VERSION}"
+echo "  -> Target release version: ${VERSION} (Tag: ${TAG})"
+
+# Step 3: Check if tag already exists
+if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+    echo "Error: Git tag ${TAG} already exists locally." >&2
+    echo "Please bump APP_VERSION in src/version.h before running release." >&2
+    exit 1
+fi
+
+# Step 4: Run test suite
+echo "==> Step 3: Running test suite (make test)..."
+make test
+
+# Step 5: Build PS5 payload
+echo "==> Step 4: Cross-compiling PS5 payload (make ps5)..."
+make ps5
+
+# Step 6: Validate payload ELF binary
+echo "==> Step 5: Validating payload ELF binary..."
+ELF_PATH="bin/ps5-yt-uploader.elf"
+if [ ! -f "${ELF_PATH}" ]; then
+    echo "Error: Payload ELF binary not found at ${ELF_PATH}" >&2
+    exit 1
+fi
+
+ELF_INFO=$(file "${ELF_PATH}")
+echo "  -> ELF Info: ${ELF_INFO}"
+if ! echo "${ELF_INFO}" | grep -qi "ELF 64-bit"; then
+    echo "Error: ${ELF_PATH} is not an ELF 64-bit binary" >&2
+    exit 1
+fi
+
+SIZE=$(stat -f%z "${ELF_PATH}" 2>/dev/null || stat -c%s "${ELF_PATH}" 2>/dev/null)
+MAX_SIZE=716800  # 700 KB in bytes
+if [ "${SIZE}" -ge "${MAX_SIZE}" ]; then
+    echo "Error: Payload size ${SIZE} bytes exceeds maximum limit of ${MAX_SIZE} bytes (700 KB)" >&2
+    exit 1
+fi
+echo "  -> Payload size constraint passed: ${SIZE} bytes (< ${MAX_SIZE} bytes)"
+
+SHA256=$(shasum -a 256 "${ELF_PATH}" | awk '{print $1}')
+echo "  -> SHA-256 Checksum: ${SHA256}"
+
+# Step 7: Finalize or simulate release
+if [ "${DRY_RUN}" = true ]; then
+    echo "=========================================================="
+    echo ">> [DRY RUN] Release verification successful!"
+    echo "   Version:     ${VERSION}"
+    echo "   Tag:         ${TAG}"
+    echo "   Binary:      ${ELF_PATH} (${SIZE} bytes)"
+    echo "   SHA-256:     ${SHA256}"
+    echo ">> [DRY RUN] Skipping tag creation and git push."
+    echo "=========================================================="
+    exit 0
+fi
+
+# Non-dry-run: prompt for confirmation if interactive
+if [ -t 0 ] && [ "${ASSUME_YES}" = false ]; then
+    read -r -p "Create annotated tag ${TAG} and push to origin? [y/N] " CONFIRM
+    if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
+        echo "Release aborted by user."
+        exit 1
+    fi
+fi
+
+echo "==> Step 6: Creating annotated tag ${TAG}..."
+git tag -a "${TAG}" -m "Release ${TAG} - PS5 YouTube Uploader"
+
+echo "==> Step 7: Pushing tag ${TAG} to origin..."
+git push origin "${TAG}"
+
+echo "=========================================================="
+echo ">> Successfully released and pushed tag ${TAG}!"
+echo ">> GitHub Actions workflow has been triggered at:"
+echo "   https://github.com/temp-latif07/ps5-yt-uploader/actions"
+echo "=========================================================="
