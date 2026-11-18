@@ -86,7 +86,8 @@ static void handle_api_clips(const char* req_body, char* resp_out, size_t max_re
     }
 
     if (rc == 0 && clips && count > 0) {
-        for (size_t i = 0; i < count; i++) {
+        size_t limit = (count > 100) ? 100 : count;
+        for (size_t i = 0; i < limit; i++) {
             cJSON* item = cJSON_CreateObject();
             if (item) {
                 cJSON_AddStringToObject(item, "filepath", clips[i].filepath);
@@ -219,6 +220,11 @@ static void handle_api_auth(const char* req_body, char* resp_out, size_t max_res
     cJSON* id_item = cJSON_GetObjectItem(root, "channel_id");
     if (id_item && cJSON_IsString(id_item) && id_item->valuestring[0]) {
         snprintf(cfg.channel_id, sizeof(cfg.channel_id), "%s", id_item->valuestring);
+    }
+
+    cJSON* key_item = cJSON_GetObjectItem(root, "innertube_key");
+    if (key_item && cJSON_IsString(key_item) && key_item->valuestring[0]) {
+        snprintf(cfg.innertube_key, sizeof(cfg.innertube_key), "%s", key_item->valuestring);
     }
 
     cJSON_Delete(root);

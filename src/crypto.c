@@ -130,6 +130,7 @@ static void sha1_final(sha1_ctx_t* ctx, uint8_t digest[20]) {
 }
 
 void sha1_hex(const unsigned char* data, size_t len, char hex_out[41]) {
+    if (!hex_out) return;
     static const char hex_digits[] = "0123456789abcdef";
     uint8_t digest[20];
     sha1_ctx_t ctx;

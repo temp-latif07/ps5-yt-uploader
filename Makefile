@@ -37,7 +37,7 @@ $(SRC_DIR)/web_assets.h: web/index.html web/style.css web/app.js scripts/bundle_
 $(BIN_DIR)/ps5-youtube-host: $(BIN_DIR) $(SRC_DIR)/web_assets.h $(wildcard $(SRC_DIR)/*.c) $(VENDOR_DIR)/cJSON.c
 	$(CC) $(CFLAGS) $(filter %.c, $^) -o $@ $(LDFLAGS)
 
-ps5: $(BIN_DIR) $(SRC_DIR)/web_assets.h
+ps5: $(BIN_DIR) $(SRC_DIR)/web_assets.h $(wildcard $(SRC_DIR)/*.c) $(VENDOR_DIR)/cJSON.c
 	$(CC) $(PS5_CFLAGS) $(wildcard $(SRC_DIR)/*.c) $(VENDOR_DIR)/cJSON.c -o $(BIN_DIR)/ps5-youtube.elf $(PS5_LDFLAGS)
 	@if [ -n "$(LLVM_STRIP)" ]; then $(LLVM_STRIP) $(BIN_DIR)/ps5-youtube.elf 2>/dev/null || true; fi
 	@echo "Built $(BIN_DIR)/ps5-youtube.elf size: $$(ls -lh $(BIN_DIR)/ps5-youtube.elf | awk '{print $$5}')"

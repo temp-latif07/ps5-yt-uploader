@@ -23,8 +23,8 @@ static char g_scotty_init_url[512] = {0};
 static char g_innertube_url[512] = {0};
 static size_t g_chunk_size = DEFAULT_CHUNK_SIZE;
 
-static int g_last_http_status = 0;
-static char g_last_error_message[256] = {0};
+static __thread int g_last_http_status = 0;
+static __thread char g_last_error_message[256] = {0};
 
 void youtube_set_base_urls(const char* scotty_init_url, const char* innertube_createvideo_url) {
     if (scotty_init_url && *scotty_init_url) {

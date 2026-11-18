@@ -156,6 +156,7 @@ static size_t curl_header_cb(char* buffer, size_t size, size_t nitems, void* use
         if (sscanf(line, "HTTP/%*d.%*d %d %63[^\r\n]", &code, msg) >= 1) {
             resp->status_code = code;
             strncpy(resp->status_message, msg, sizeof(resp->status_message) - 1);
+            resp->status_message[sizeof(resp->status_message) - 1] = '\0';
         }
     } else {
         char* colon = strchr(line, ':');

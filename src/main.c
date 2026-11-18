@@ -109,20 +109,29 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // 3. server_start(port)
+    // 3. Signal handling (SIGINT, SIGTERM, SIGPIPE)
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handle_signal;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+    signal(SIGPIPE, SIG_IGN);
+
+    // 4. server_start(port)
     if (server_start(port) != 0) {
         fprintf(stderr, "Error: Failed to start HTTP server on port %d\n", port);
         return 1;
     }
 
-    // 4. api_init(captures_dir)
+    // 5. api_init(captures_dir)
     if (api_init(captures_dir) != 0) {
         fprintf(stderr, "Error: Failed to initialize REST API routes\n");
         server_stop();
         return 1;
     }
 
-    // 5. watcher_init(captures_dir, on_clip_ready, NULL) and watcher_start()
+    // 6. watcher_init(captures_dir, on_clip_ready, NULL) and watcher_start()
     if (watcher_init(captures_dir, on_clip_ready, NULL) != 0) {
         fprintf(stderr, "Error: Failed to initialize watcher for '%s'\n", captures_dir);
         api_cleanup();
@@ -137,19 +146,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 6. notify_send("YouTube Uploader running on port <port>")
+    // 7. notify_send("YouTube Uploader running on port <port>")
     char notify_msg[128];
     snprintf(notify_msg, sizeof(notify_msg), "YouTube Uploader running on port %d", port);
     notify_send(notify_msg);
-
-    // 7. Signal handling (SIGINT, SIGTERM)
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = handle_signal;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGTERM, &sa, NULL);
-    signal(SIGPIPE, SIG_IGN);
 
     while (g_running) {
         sleep(1);

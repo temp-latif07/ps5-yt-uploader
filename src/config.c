@@ -31,8 +31,8 @@ static int mkdir_p(const char* path, mode_t mode) {
 
     snprintf(tmp, sizeof(tmp), "%s", path);
     len = strlen(tmp);
-    if (len > 0 && tmp[len - 1] == '/') {
-        tmp[len - 1] = '\0';
+    while (len > 1 && tmp[len - 1] == '/') {
+        tmp[--len] = '\0';
     }
 
     for (p = tmp + 1; *p; p++) {
@@ -359,6 +359,11 @@ int history_mark_uploaded(const char* filepath, const char* video_id) {
 
     if (!s_history_json) {
         load_history_locked();
+    }
+
+    if (!s_history_json) {
+        pthread_mutex_unlock(&s_config_mutex);
+        return -1;
     }
 
     // Ensure directory exists
