@@ -45,18 +45,30 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Set up LLVM Toolchain
+      - name: Set up LLVM / LLD Toolchain
         run: |
           if ! command -v ld.lld &>/dev/null; then
-            if [ -d "/opt/homebrew/opt/llvm/bin" ]; then
-              echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
-            elif [ -d "/usr/local/opt/llvm/bin" ]; then
-              echo "/usr/local/opt/llvm/bin" >> $GITHUB_PATH
+            if ls /opt/homebrew/bin/ld.lld &>/dev/null; then
+              echo "/opt/homebrew/bin" >> $GITHUB_PATH
+            elif ls /opt/homebrew/opt/llvm*/bin/ld.lld &>/dev/null; then
+              LLD_DIR=$(dirname $(ls /opt/homebrew/opt/llvm*/bin/ld.lld | head -n 1))
+              echo "$LLD_DIR" >> $GITHUB_PATH
+            elif ls /usr/local/opt/llvm*/bin/ld.lld &>/dev/null; then
+              LLD_DIR=$(dirname $(ls /usr/local/opt/llvm*/bin/ld.lld | head -n 1))
+              echo "$LLD_DIR" >> $GITHUB_PATH
             else
-              brew install llvm
+              brew install lld llvm
               echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
+              echo "$(brew --prefix lld)/bin" >> $GITHUB_PATH
             fi
           fi
+
+      - name: Extract Release Notes from CHANGELOG.md
+        id: notes
+        run: |
+          python3 scripts/extract_release_notes.py "${{ steps.vars.outputs.release_tag }}" > release_notes.md
+          echo "=== Extracted Release Notes ==="
+          cat release_notes.md
 
       - name: Run host test suite
         run: |
@@ -126,7 +138,8 @@ jobs:
         with:
           tag_name: ${{ steps.vars.outputs.release_tag }}
           name: ${{ steps.vars.outputs.release_tag }} - PS5 YouTube Uploader
+          body_path: release_notes.md
           files: |
             bin/ps5-yt-uploader.elf
             bin/ps5-yt-uploader.elf.sha256
-          generate_release_notes: true
+            bin/ps5-youtube.elf

@@ -3,8 +3,8 @@ CFLAGS ?= -Wall -Wextra -std=c99 -Iinclude -Isrc -Ivendor -pthread -g
 LDFLAGS ?= -pthread -lcurl -lsqlite3
 
 # Cross-compilation variables for PS5 FreeBSD 12 ELF
-LLD_PATH ?= $(shell which ld.lld 2>/dev/null || ls /opt/homebrew/opt/llvm*/bin/ld.lld 2>/dev/null | head -n 1)
-LLVM_STRIP ?= $(shell which llvm-strip 2>/dev/null || ls /opt/homebrew/opt/llvm*/bin/llvm-strip 2>/dev/null | head -n 1 || which strip 2>/dev/null)
+LLD_PATH ?= $(shell which ld.lld 2>/dev/null || ls /opt/homebrew/bin/ld.lld /opt/homebrew/opt/llvm*/bin/ld.lld /usr/local/bin/ld.lld /usr/bin/ld.lld 2>/dev/null | head -n 1)
+LLVM_STRIP ?= $(shell which llvm-strip 2>/dev/null || ls /opt/homebrew/bin/llvm-strip /opt/homebrew/opt/llvm*/bin/llvm-strip /usr/local/bin/llvm-strip 2>/dev/null | head -n 1 || which strip 2>/dev/null)
 MACOS_SDK ?= $(shell xcrun --show-sdk-path 2>/dev/null)
 
 PS5_CFLAGS ?= -target x86_64-unknown-freebsd12 -O2 -fPIC -DPS5 -I./include -I./src -I./vendor
@@ -38,6 +38,10 @@ $(BIN_DIR)/ps5-youtube-host: $(BIN_DIR) $(SRC_DIR)/web_assets.h $(wildcard $(SRC
 	$(CC) $(CFLAGS) $(filter %.c, $^) -o $@ $(LDFLAGS)
 
 ps5: $(BIN_DIR) $(SRC_DIR)/web_assets.h $(wildcard $(SRC_DIR)/*.c) $(VENDOR_DIR)/cJSON.c
+	@if [ -z "$(LLD_PATH)" ]; then \
+		echo "Error: ld.lld is required for PS5 ELF cross-compilation. Please install lld (e.g. brew install lld)." >&2; \
+		exit 1; \
+	fi
 	$(CC) $(PS5_CFLAGS) $(wildcard $(SRC_DIR)/*.c) $(VENDOR_DIR)/cJSON.c -o $(BIN_DIR)/ps5-yt-uploader.elf $(PS5_LDFLAGS)
 	@if [ -n "$(LLVM_STRIP)" ]; then $(LLVM_STRIP) $(BIN_DIR)/ps5-yt-uploader.elf 2>/dev/null || true; fi
 	@ln -sf ps5-yt-uploader.elf $(BIN_DIR)/ps5-youtube.elf

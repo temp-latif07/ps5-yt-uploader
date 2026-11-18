@@ -199,6 +199,23 @@ echo "${NON_INT_ERR}" | grep -q "Error: Non-interactive execution requires -y or
 }
 echo "  -> Non-interactive execution correctly requires -y or --yes flag."
 
+# -------------------------------------------------------------
+# Test 6: Validate CHANGELOG.md and extract_release_notes.py
+# -------------------------------------------------------------
+echo "[Test 6] Testing CHANGELOG.md and release notes extractor..."
+
+if [ ! -f "${REPO_ROOT}/CHANGELOG.md" ]; then
+    echo "FAIL: CHANGELOG.md does not exist" >&2
+    exit 1
+fi
+
+NOTES_OUTPUT=$(python3 "${REPO_ROOT}/scripts/extract_release_notes.py" "v1.0.0")
+echo "${NOTES_OUTPUT}" | grep -q "Autonomous gameplay uploads directly from PS5 SSD to YouTube" || {
+    echo "FAIL: extract_release_notes.py failed to extract 1.0.0 notes from CHANGELOG.md" >&2
+    exit 1
+}
+echo "  -> Release notes successfully extracted from CHANGELOG.md."
+
 echo "=========================================================="
 echo "All Release Workflow & Script Validation Tests Passed Successfully!"
 echo "=========================================================="
