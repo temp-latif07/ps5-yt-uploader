@@ -5,7 +5,6 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORKFLOW_FILE="${REPO_ROOT}/.github/workflows/release.yml"
 RELEASE_SCRIPT="${REPO_ROOT}/scripts/release.sh"
 
 echo "=========================================================="
@@ -13,100 +12,38 @@ echo " Running Release Workflow & Script Validation Tests"
 echo "=========================================================="
 
 # -------------------------------------------------------------
-# Test 1: Validate .github/workflows/release.yml
+# Test 1: Validate scripts/release.sh presence and permissions
 # -------------------------------------------------------------
-echo "[Test 1] Validating .github/workflows/release.yml..."
-
-if [ ! -f "${WORKFLOW_FILE}" ]; then
-    echo "FAIL: ${WORKFLOW_FILE} does not exist" >&2
-    exit 1
-fi
-
-# Validate YAML syntax using ruby if available
-if command -v ruby &>/dev/null; then
-    ruby -e "require 'yaml'; YAML.load_file('${WORKFLOW_FILE}')" || {
-        echo "FAIL: YAML syntax error in ${WORKFLOW_FILE}" >&2
-        exit 1
-    }
-fi
-
-# Check required triggers and inputs
-grep -q "workflow_dispatch:" "${WORKFLOW_FILE}" || {
-    echo "FAIL: workflow_dispatch trigger missing from ${WORKFLOW_FILE}" >&2
-    exit 1
-}
-
-grep -q "tag:" "${WORKFLOW_FILE}" || {
-    echo "FAIL: workflow_dispatch tag input missing from ${WORKFLOW_FILE}" >&2
-    exit 1
-}
-
-grep -q "release_tag" "${WORKFLOW_FILE}" || {
-    echo "FAIL: release_tag output resolution step missing from ${WORKFLOW_FILE}" >&2
-    exit 1
-}
-
-grep -q "git pull --rebase origin main" "${WORKFLOW_FILE}" || {
-    echo "FAIL: git pull --rebase origin main missing from ${WORKFLOW_FILE}" >&2
-    exit 1
-}
-
-grep -q "v\*\.\*\.\*" "${WORKFLOW_FILE}" || {
-    echo "FAIL: tag push trigger 'v*.*.*' missing from ${WORKFLOW_FILE}" >&2
-    exit 1
-}
-
-# Check explicit permissions
-grep -q "contents: write" "${WORKFLOW_FILE}" || {
-    echo "FAIL: 'permissions: contents: write' missing from ${WORKFLOW_FILE}" >&2
-    exit 1
-}
-
-# Check runner
-grep -q "macos-latest" "${WORKFLOW_FILE}" || {
-    echo "FAIL: runner macos-latest missing from ${WORKFLOW_FILE}" >&2
-    exit 1
-}
-
-# Check actions/checkout with fetch-depth: 0
-grep -q "actions/checkout" "${WORKFLOW_FILE}" || {
-    echo "FAIL: actions/checkout step missing from ${WORKFLOW_FILE}" >&2
-    exit 1
-}
-grep -q "fetch-depth: 0" "${WORKFLOW_FILE}" || {
-    echo "FAIL: fetch-depth: 0 missing from checkout step in ${WORKFLOW_FILE}" >&2
-    exit 1
-}
-
-# Check softprops/action-gh-release
-grep -q "softprops/action-gh-release" "${WORKFLOW_FILE}" || {
-    echo "FAIL: softprops/action-gh-release step missing from ${WORKFLOW_FILE}" >&2
-    exit 1
-}
-
-# Check payload artifact names (ps5-yt-uploader.elf)
-grep -q "ps5-yt-uploader\.elf" "${WORKFLOW_FILE}" || {
-    echo "FAIL: ps5-yt-uploader.elf artifact missing from ${WORKFLOW_FILE}" >&2
-    exit 1
-}
-
-# Check scripts/update_payload_repo.py invocation
-grep -q "update_payload_repo\.py" "${WORKFLOW_FILE}" || {
-    echo "FAIL: scripts/update_payload_repo.py invocation missing from ${WORKFLOW_FILE}" >&2
-    exit 1
-}
-
-echo "  -> Release workflow YAML syntax and structure validated."
-
-# -------------------------------------------------------------
-# Test 2: Validate scripts/release.sh presence and permissions
-# -------------------------------------------------------------
-echo "[Test 2] Validating scripts/release.sh presence and permissions..."
+echo "[Test 1] Validating scripts/release.sh presence and permissions..."
 
 if [ ! -f "${RELEASE_SCRIPT}" ]; then
     echo "FAIL: ${RELEASE_SCRIPT} does not exist" >&2
     exit 1
 fi
+
+if [ ! -x "${RELEASE_SCRIPT}" ]; then
+    echo "FAIL: ${RELEASE_SCRIPT} is not executable" >&2
+    exit 1
+fi
+echo "  -> scripts/release.sh is present and executable."
+
+# -------------------------------------------------------------
+# Test 2: Validate scripts/release.sh CLI options
+# -------------------------------------------------------------
+echo "[Test 2] Validating scripts/release.sh CLI options..."
+grep -q -- "--dry-run" "${RELEASE_SCRIPT}" || {
+    echo "FAIL: --dry-run option missing from ${RELEASE_SCRIPT}" >&2
+    exit 1
+}
+grep -q "update_payload_repo\.py" "${RELEASE_SCRIPT}" || {
+    echo "FAIL: update_payload_repo.py invocation missing from ${RELEASE_SCRIPT}" >&2
+    exit 1
+}
+grep -q "extract_release_notes\.py" "${RELEASE_SCRIPT}" || {
+    echo "FAIL: extract_release_notes.py invocation missing from ${RELEASE_SCRIPT}" >&2
+    exit 1
+}
+echo "  -> scripts/release.sh CLI options and helpers verified."
 
 if [ ! -x "${RELEASE_SCRIPT}" ]; then
     echo "FAIL: ${RELEASE_SCRIPT} is not executable" >&2
@@ -145,9 +82,10 @@ if [ "${TAGS_BEFORE}" != "${TAGS_AFTER}" ]; then
     exit 1
 fi
 
-# Output must report expected version 1.0.0
-echo "${OUTPUT}" | grep -q "1.0.0" || {
-    echo "FAIL: Release script did not report expected version 1.0.0" >&2
+# Output must report expected version from src/version.h
+EXPECTED_VERSION=$(grep -E '^#define[[:space:]]+APP_VERSION[[:space:]]+"[^"]+"' "${REPO_ROOT}/src/version.h" | sed -E 's/.*"([^"]+)".*/\1/')
+echo "${OUTPUT}" | grep -q "${EXPECTED_VERSION}" || {
+    echo "FAIL: Release script did not report expected version ${EXPECTED_VERSION}" >&2
     exit 1
 }
 

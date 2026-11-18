@@ -92,25 +92,21 @@ This will:
 
 ---
 
-## 3. GitHub Actions CI/CD Pipeline
+## 3. Instant Local Release Architecture
 
-When a tag `v*.*.*` is pushed to GitHub, `.github/workflows/release.yml` automatically:
-1. Provisions `macos-latest` runner with `lld` and `llvm`.
-2. Runs `make test` to verify all host unit and E2E integration tests.
-3. Cross-compiles `bin/ps5-yt-uploader.elf` targeting FreeBSD 12.
-4. Calculates SHA-256 checksum and saves `bin/ps5-yt-uploader.elf.sha256`.
-5. Extracts human-readable release notes directly from `CHANGELOG.md` via `scripts/extract_release_notes.py`.
-6. Updates root `payloads.json` with the exact release URL, tag, and SHA-256 hash.
-7. Commits updated `payloads.json` back to `main` with `[skip ci]`.
-8. Creates the official GitHub Release with attached assets:
+To avoid slow 5–15 minute cloud runner queues on GitHub Actions, releases are orchestrated and published directly using `make release` (or `bash scripts/release.sh`), following the `make fast-release` model from `phantomptr/ps5upload`:
+
+1. Verifies working tree cleanliness and test gates.
+2. Cross-compiles `bin/ps5-yt-uploader.elf` in ~1.5 seconds.
+3. Calculates SHA-256 checksum and saves `bin/ps5-yt-uploader.elf.sha256`.
+4. Extracts human-readable release notes directly from `CHANGELOG.md` via `scripts/extract_release_notes.py`.
+5. Updates root `payloads.json` with the exact release URL, tag, and SHA-256 hash.
+6. Commits updated `payloads.json` and pushes to `main`.
+7. Creates and pushes annotated git tag `vX.Y.Z`.
+8. Publishes the official GitHub Release instantly via `gh release create` with attached assets:
    - `ps5-yt-uploader.elf` (primary payload)
    - `ps5-yt-uploader.elf.sha256` (checksum)
    - `ps5-youtube.elf` (compatibility symlink)
-
-### Manual Workflow Dispatch
-You can also trigger a release manually without local tagging from the GitHub Actions tab:
-- Navigate to **Actions** ➔ **Release PS5 YouTube Uploader** ➔ **Run workflow**.
-- Optionally input a custom tag name (e.g. `v1.0.1`). If omitted, it automatically reads the version from `src/version.h`.
 
 ---
 

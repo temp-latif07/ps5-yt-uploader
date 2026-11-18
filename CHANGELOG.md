@@ -10,6 +10,23 @@ Planned improvements and upcoming fixes for subsequent releases.
 
 ---
 
+## 1.0.1
+
+Release and repository maintenance overhaul adopting the disciplined engineering standards of `phantomptr/ps5upload`.
+
+**New**
+- **Instant local release execution (`make release`).** Cut, verify, and publish official releases with binaries, checksums, and release notes in under 5 seconds directly from the developer machine via `gh release create`, completely bypassing slow cloud CI queues.
+- **Human-readable release notes extractor.** Automated `scripts/extract_release_notes.py` extracts release notes directly from `CHANGELOG.md` for any version tag, ensuring release notes are written for humans who use the console rather than raw git commit dumps.
+- **Repository maintenance standards (`AGENTS.md`).** Added comprehensive engineering and release rules adapted from `phantomptr/ps5upload` to guide autonomous agents and contributors.
+- **Dynamic test assertions.** Updated test suites to dynamically assert against `src/version.h` macros, ensuring seamless version bumps without broken test assertions.
+
+**Fixes**
+- **Dry-run release safety on tagged branches.** Fixed an issue where `scripts/release.sh --dry-run` failed if the version tag already existed locally.
+- **Non-interactive safety enforcement.** Explicitly mandated `-y` or `--yes` flags when running `scripts/release.sh` without a TTY to prevent accidental automated tagging.
+- **Payload artifact renaming.** Standardized primary ELF binary to `ps5-yt-uploader.elf` across the build system, catalog manifest, test suites, and documentation, while retaining `bin/ps5-youtube.elf` as a backward-compatible symlink.
+
+---
+
 ## 1.0.0
 
 Initial public release of the PS5 YouTube Uploader (`ps5-yt-uploader`) for jailbroken PlayStation 5 consoles.

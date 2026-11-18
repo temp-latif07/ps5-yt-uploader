@@ -145,7 +145,8 @@ if [ "${SIZE}" -ge "${MAX_SIZE}" ]; then
 fi
 echo "  -> Payload size constraint passed: ${SIZE} bytes (< ${MAX_SIZE} bytes)"
 
-SHA256=$(shasum -a 256 "${ELF_PATH}" | awk '{print $1}')
+(cd "$(dirname "${ELF_PATH}")" && shasum -a 256 "$(basename "${ELF_PATH}")" > "$(basename "${ELF_PATH}").sha256")
+SHA256=$(awk '{print $1}' "${ELF_PATH}.sha256")
 echo "  -> SHA-256 Checksum: ${SHA256}"
 
 # Step 7: Finalize or simulate release
@@ -208,8 +209,8 @@ if command -v gh &>/dev/null && gh auth status &>/dev/null; then
         "${ELF_PATH}.sha256" \
         "bin/ps5-youtube.elf" \
         --title "${TAG} - PS5 YouTube Uploader" \
-        --notes "${RELEASE_NOTES}" 2>/dev/null || {
-            echo "Notice: gh release create returned non-zero (release may already exist or CI is building)."
+        --notes "${RELEASE_NOTES}" || {
+            echo "Notice: gh release create returned non-zero (release may already exist)."
         }
     echo "  -> GitHub Release published instantly!"
 fi

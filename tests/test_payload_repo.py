@@ -283,7 +283,7 @@ class TestPayloadRepoGenerator(unittest.TestCase):
         version_header = os.path.join(REPO_ROOT, "src", "version.h")
         if os.path.exists(version_header):
             version = extract_version_from_header(version_header)
-            self.assertEqual(version, "1.0.0")
+            self.assertRegex(version, r"^\d+\.\d+\.\d+$")
 
     def test_cli_invocation(self):
         """Verify update_payload_repo.py CLI with options and --check validation."""

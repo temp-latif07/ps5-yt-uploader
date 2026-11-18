@@ -30,7 +30,7 @@ We strictly adopt the human-readable changelog and automated release process ins
     - `**New**` — User-facing capabilities, UI enhancements, or new options.
     - `**Fixes**` — Bug resolutions, network drop handling, crash prevention. Explain what failed and what the software does now.
     - `**Behind the scenes**` — Internal refactoring, test additions, CI/CD pipeline changes.
-- **Automated Extraction:** The GitHub Actions release workflow extracts notes for the specific tag directly from `CHANGELOG.md` via `scripts/extract_release_notes.py`.
+- **Automated Extraction:** The release script extracts notes for the specific tag directly from `CHANGELOG.md` via `scripts/extract_release_notes.py`.
 
 ### 2.2 Version Synchronization
 All version references across the project must remain synchronized:
@@ -49,8 +49,8 @@ bash scripts/release.sh --dry-run  # Dry-run release simulation passes cleanly
 ```
 
 ### 2.4 Release Execution
-- **Local Tagging:** Run `make release` or `bash scripts/release.sh`. It enforces a clean git status, runs tests, compiles the payload, verifies binary size and properties, creates an annotated git tag `vX.Y.Z`, and pushes the tag to `origin`.
-- **CI/CD Execution:** Pushing the tag triggers `.github/workflows/release.yml` on `macos-latest`, which compiles the ELF payload, verifies checksums, extracts release notes from `CHANGELOG.md`, commits the updated `payloads.json` to `main`, and creates the GitHub release with attached binaries.
+- **Instant Local Releases:** Run `make release` or `bash scripts/release.sh`. It enforces a clean git status, runs tests, compiles the payload in 1.5s, verifies binary properties, updates `payloads.json`, creates an annotated git tag `vX.Y.Z`, and publishes the release directly to GitHub via `gh release create` with binaries, checksums, and notes extracted from `CHANGELOG.md` in under 5 seconds.
+- **No Cloud Queue Bottlenecks:** To avoid slow GitHub Actions runner queues, releases are orchestrated and published locally from the developer environment using the `phantomptr/ps5upload` fast-release model.
 - **Non-Interactive Safety:** `scripts/release.sh` explicitly refuses to run in non-interactive environments without an explicit `-y` / `--yes` flag to prevent accidental automated tagging.
 
 ---

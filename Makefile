@@ -47,7 +47,7 @@ ps5: $(BIN_DIR) $(SRC_DIR)/web_assets.h $(wildcard $(SRC_DIR)/*.c) $(VENDOR_DIR)
 	@ln -sf ps5-yt-uploader.elf $(BIN_DIR)/ps5-youtube.elf
 	@echo "Built $(BIN_DIR)/ps5-yt-uploader.elf size: $$(ls -lh $(BIN_DIR)/ps5-yt-uploader.elf | awk '{print $$5}')"
 
-$(BIN_DIR)/test_version: $(TESTS_DIR)/test_version_cli.c
+$(BIN_DIR)/test_version: $(TESTS_DIR)/test_version_cli.c $(SRC_DIR)/version.h
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
 test_version: $(BIN_DIR)/ps5-youtube-host $(BIN_DIR)/test_version
@@ -80,7 +80,7 @@ $(BIN_DIR)/test_watcher: $(TESTS_DIR)/test_watcher.c $(SRC_DIR)/watcher.c $(SRC_
 test_watcher: $(BIN_DIR) $(BIN_DIR)/test_watcher
 	./$(BIN_DIR)/test_watcher
 
-$(BIN_DIR)/test_server: $(TESTS_DIR)/test_server_api.c $(SRC_DIR)/server.c $(SRC_DIR)/api.c $(SRC_DIR)/watcher.c $(SRC_DIR)/notify.c $(SRC_DIR)/youtube.c $(SRC_DIR)/http_client.c $(SRC_DIR)/crypto.c $(SRC_DIR)/config.c $(VENDOR_DIR)/cJSON.c $(SRC_DIR)/web_assets.h
+$(BIN_DIR)/test_server: $(TESTS_DIR)/test_server_api.c $(SRC_DIR)/server.c $(SRC_DIR)/api.c $(SRC_DIR)/watcher.c $(SRC_DIR)/notify.c $(SRC_DIR)/youtube.c $(SRC_DIR)/http_client.c $(SRC_DIR)/crypto.c $(SRC_DIR)/config.c $(VENDOR_DIR)/cJSON.c $(SRC_DIR)/web_assets.h $(SRC_DIR)/version.h
 	$(CC) $(CFLAGS) $(filter %.c, $^) -o $@ $(LDFLAGS)
 
 test_server: $(BIN_DIR) $(BIN_DIR)/test_server
