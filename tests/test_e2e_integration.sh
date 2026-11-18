@@ -155,7 +155,7 @@ echo "  -> Authentication confirmed!"
 
 echo "=== Step 6: Simulating Capture File Creation & Verifying Auto-Upload ==="
 mkdir -p "$CAPTURES_DIR/CUSA00123"
-SAMPLE_SRC="spikes/sample_clip.mp4"
+SAMPLE_SRC="tests/assets/sample_clip.mp4"
 if [ ! -f "$SAMPLE_SRC" ]; then
     echo "FAIL: $SAMPLE_SRC not found!"
     exit 1

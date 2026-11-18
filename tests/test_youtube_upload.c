@@ -15,7 +15,8 @@
 #include "../src/youtube.h"
 
 #define MOCK_PORT 8999
-#define SAMPLE_CLIP_PATH "spikes/sample_clip.mp4"
+#define SAMPLE_CLIP_PATH "tests/assets/sample_clip.mp4"
+// 1. Normal end-to-end upload of tests/assets/sample_clip.mp4
 
 static pid_t mock_server_pid = 0;
 
@@ -93,7 +94,7 @@ static void setup_valid_config(app_config_t* cfg) {
     cfg->server_port = 8888;
 }
 
-// 1. Normal end-to-end upload of spikes/sample_clip.mp4
+// 1. Normal end-to-end upload of tests/assets/sample_clip.mp4
 static void test_normal_upload_e2e(void) {
     printf("[Test 1] Running normal end-to-end upload...\n");
 
