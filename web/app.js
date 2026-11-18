@@ -532,16 +532,21 @@
     });
   }
 
-  async function submitUpload(filepath, title, description, privacy) {
+  async function submitUpload(filepath, title, description, privacy, madeForKids, playlistId) {
+    const payload = {
+      filepath: filepath,
+      title: title,
+      description: description,
+      privacy: privacy,
+      made_for_kids: !!madeForKids
+    };
+    if (playlistId) {
+      payload.playlist_id = playlistId;
+    }
     return await apiFetch('/api/upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        filepath: filepath,
-        title: title,
-        description: description,
-        privacy: privacy
-      })
+      body: JSON.stringify(payload)
     });
   }
 
@@ -770,6 +775,10 @@
     if (privSelect) {
       privSelect.value = state.defaultPrivacy || 'UNLISTED';
     }
+    const kidsSelect = document.getElementById('modal-select-kids');
+    if (kidsSelect) kidsSelect.value = 'false';
+    const plInput = document.getElementById('modal-input-playlist');
+    if (plInput) plInput.value = '';
 
     if (modal) {
       modal.style.display = 'flex';
@@ -792,6 +801,10 @@
     const title = document.getElementById('modal-input-title').value.trim();
     const description = document.getElementById('modal-input-description').value.trim();
     const privacy = document.getElementById('modal-select-privacy').value;
+    const kidsSelect = document.getElementById('modal-select-kids');
+    const madeForKids = kidsSelect ? (kidsSelect.value === 'true') : false;
+    const playlistInput = document.getElementById('modal-input-playlist');
+    const playlistId = playlistInput ? playlistInput.value.trim() : '';
     const alertBox = document.getElementById('modal-alert-box');
     const submitBtn = document.getElementById('btn-modal-submit');
 
@@ -809,7 +822,7 @@
     }
 
     try {
-      const res = await submitUpload(filepath, title, description, privacy);
+      const res = await submitUpload(filepath, title, description, privacy, madeForKids, playlistId);
       closeUploadModal();
 
       // Track queued task locally in background uploading state

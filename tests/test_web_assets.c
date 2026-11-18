@@ -145,6 +145,8 @@ int main(void) {
     assert(ci_strstr(headers, "Cache-Control: no-cache") != NULL);
     assert(strstr(body, "<title>PS5 YouTube Uploader</title>") != NULL);
     assert(strstr(body, "Clips Gallery") != NULL);
+    assert(strstr(body, "modal-select-kids") != NULL);
+    assert(strstr(body, "modal-input-playlist") != NULL);
     printf("  -> GET / returned 200 OK with Content-Type: text/html and title confirmed!\n");
 
     // Test 2: GET /index.html (Alias path delivers HTML dashboard)
