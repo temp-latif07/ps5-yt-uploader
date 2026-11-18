@@ -1,0 +1,6 @@
+client_secret*.json
+oauth_config.json
+oauth_token.json
+cookies.txt
+*.log
+.superpowers/
