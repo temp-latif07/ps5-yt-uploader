@@ -9,6 +9,7 @@
 #include <strings.h>
 #include <unistd.h>
 #include <errno.h>
+#include <signal.h>
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -20,6 +21,10 @@
 
 #define MAX_REQ_SIZE (64 * 1024)
 #define MAX_RESP_SIZE (64 * 1024)
+
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 
 typedef struct route_node {
     char method[16];
@@ -57,7 +62,7 @@ static const char* find_case_insensitive(const char* haystack, const char* needl
 static int send_all(int fd, const char* data, size_t len) {
     size_t total_sent = 0;
     while (total_sent < len) {
-        ssize_t n = send(fd, data + total_sent, len - total_sent, 0);
+        ssize_t n = send(fd, data + total_sent, len - total_sent, MSG_NOSIGNAL);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
@@ -165,10 +170,33 @@ static void send_bad_request_response(int fd) {
     send_all(fd, body, body_len);
 }
 
+static void send_payload_too_large_response(int fd) {
+    const char* body = "{\"error\":\"Payload Too Large\"}";
+    size_t body_len = strlen(body);
+    char header_buf[512];
+    int hlen = snprintf(header_buf, sizeof(header_buf),
+        "HTTP/1.1 413 Payload Too Large\r\n"
+        "Content-Type: application/json; charset=utf-8\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+        "Access-Control-Allow-Headers: *\r\n"
+        "Content-Length: %zu\r\n"
+        "Connection: close\r\n"
+        "\r\n",
+        body_len);
+    send_all(fd, header_buf, (size_t)hlen);
+    send_all(fd, body, body_len);
+}
+
 static void* connection_worker(void* arg) {
     client_worker_arg_t* warg = (client_worker_arg_t*)arg;
     int client_fd = warg->client_fd;
     free(warg);
+
+#ifdef SO_NOSIGPIPE
+    int nosig = 1;
+    setsockopt(client_fd, SOL_SOCKET, SO_NOSIGPIPE, &nosig, sizeof(nosig));
+#endif
 
     struct timeval tv;
     tv.tv_sec = 3;
@@ -226,6 +254,18 @@ static void* connection_worker(void* arg) {
 
     size_t sep_len = (strstr(req_buf, "\r\n\r\n") != NULL) ? 4 : 2;
     size_t header_len = (size_t)(header_end - req_buf) + sep_len;
+    if (header_len >= MAX_REQ_SIZE - 1) {
+        send_bad_request_response(client_fd);
+        free(req_buf);
+        close(client_fd);
+        pthread_mutex_lock(&s_server_mutex);
+        s_active_workers--;
+        if (s_active_workers == 0) {
+            pthread_cond_broadcast(&s_workers_cond);
+        }
+        pthread_mutex_unlock(&s_server_mutex);
+        return NULL;
+    }
     char* body_start = req_buf + header_len;
 
     // Check Content-Length
@@ -235,9 +275,22 @@ static void* connection_worker(void* arg) {
         content_len = (size_t)strtoul(cl_ptr + 15, NULL, 10);
     }
 
+    if (content_len > (MAX_REQ_SIZE - 1 - header_len)) {
+        send_payload_too_large_response(client_fd);
+        free(req_buf);
+        close(client_fd);
+        pthread_mutex_lock(&s_server_mutex);
+        s_active_workers--;
+        if (s_active_workers == 0) {
+            pthread_cond_broadcast(&s_workers_cond);
+        }
+        pthread_mutex_unlock(&s_server_mutex);
+        return NULL;
+    }
+
     size_t body_recv = total_recv - header_len;
     while (body_recv < content_len && total_recv < MAX_REQ_SIZE - 1) {
-        ssize_t n = recv(client_fd, req_buf + total_recv, MAX_REQ_SIZE - 1 - total_recv, 0);
+        ssize_t n = recv(client_fd, req_buf + total_recv, (MAX_REQ_SIZE - 1) - total_recv, 0);
         if (n <= 0) {
             break;
         }
@@ -246,7 +299,20 @@ static void* connection_worker(void* arg) {
         req_buf[total_recv] = '\0';
     }
 
-    body_start[content_len] = '\0';
+    if (body_recv < content_len) {
+        // Client aborted/disconnected before sending advertised body
+        free(req_buf);
+        close(client_fd);
+        pthread_mutex_lock(&s_server_mutex);
+        s_active_workers--;
+        if (s_active_workers == 0) {
+            pthread_cond_broadcast(&s_workers_cond);
+        }
+        pthread_mutex_unlock(&s_server_mutex);
+        return NULL;
+    }
+
+    body_start[body_recv] = '\0';
 
     // Parse method and path
     char method[16] = {0};
@@ -385,6 +451,11 @@ static void* listener_thread_main(void* arg) {
                 continue;
             }
 
+#ifdef SO_NOSIGPIPE
+            int nosig = 1;
+            setsockopt(client_fd, SOL_SOCKET, SO_NOSIGPIPE, &nosig, sizeof(nosig));
+#endif
+
             pthread_mutex_lock(&s_server_mutex);
             if (!s_server_running) {
                 pthread_mutex_unlock(&s_server_mutex);
@@ -436,6 +507,8 @@ int server_start(int port) {
     if (port <= 0 || port > 65535) {
         return -1;
     }
+
+    signal(SIGPIPE, SIG_IGN);
 
     pthread_mutex_lock(&s_server_mutex);
     if (s_server_running) {

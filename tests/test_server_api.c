@@ -356,6 +356,155 @@ static void test_not_found_route(void) {
     printf("  -> Unknown route returned 404 Not Found as expected!\n");
 }
 
+static void test_oversized_content_length(void) {
+    printf("[Test 8] Testing oversized Content-Length (>64KB) rejection...\n");
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    assert(sock >= 0);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(TEST_PORT);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    assert(connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0);
+
+    const char* raw_req =
+        "POST /api/config HTTP/1.1\r\n"
+        "Host: 127.0.0.1:8889\r\n"
+        "Content-Length: 100000\r\n"
+        "Content-Type: application/json\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "{\"test\":1}";
+    send(sock, raw_req, strlen(raw_req), 0);
+
+    char resp[4096] = {0};
+    ssize_t n = recv(sock, resp, sizeof(resp) - 1, 0);
+    close(sock);
+
+    assert(n > 0);
+    int status = 0;
+    sscanf(resp, "HTTP/1.1 %d", &status);
+    assert(status == 413 || status == 400);
+    printf("  -> Oversized Content-Length safely rejected with HTTP %d without memory corruption!\n", status);
+}
+
+static void test_client_disconnect_and_sigpipe(void) {
+    printf("[Test 9] Testing premature disconnect and broken pipe SIGPIPE resilience...\n");
+
+    // Case 1: Connect and send partial body, then abrupt close
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    assert(sock >= 0);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(TEST_PORT);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    assert(connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0);
+
+    const char* partial_req =
+        "POST /api/upload HTTP/1.1\r\n"
+        "Host: 127.0.0.1:8889\r\n"
+        "Content-Length: 1024\r\n"
+        "Content-Type: application/json\r\n"
+        "\r\n"
+        "{\"filepath\":\"partial";
+    send(sock, partial_req, strlen(partial_req), 0);
+
+    struct linger sl = { .l_onoff = 1, .l_linger = 0 };
+    setsockopt(sock, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl));
+    close(sock);
+
+    usleep(30000); // 30ms
+
+    // Case 2: Connect, send full GET request, but close immediately so server sends response into closed socket
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    assert(sock >= 0);
+    assert(connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0);
+    const char* get_req = "GET /api/status HTTP/1.1\r\nHost: 127.0.0.1:8889\r\nConnection: close\r\n\r\n";
+    send(sock, get_req, strlen(get_req), 0);
+    setsockopt(sock, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl));
+    close(sock);
+
+    usleep(50000); // 50ms
+
+    // Verify daemon is still alive and answering requests
+    int status = 0;
+    char headers[2048] = {0};
+    char body[1024] = {0};
+    int rc = http_request(TEST_PORT, "GET", "/api/status", NULL, NULL,
+                          &status, headers, sizeof(headers), body, sizeof(body));
+    assert(rc == 0);
+    assert(status == 200);
+    printf("  -> Server survived premature disconnect and broken pipe without SIGPIPE termination!\n");
+}
+
+static void test_upload_concurrency_limit(void) {
+    printf("[Test 10] Testing POST /api/upload concurrency limit rejection...\n");
+
+    char clip_path[512];
+    snprintf(clip_path, sizeof(clip_path), "%s/CUSA00001/clip1.mp4", TEST_CAPTURES_DIR);
+
+    char req_json[1024];
+    snprintf(req_json, sizeof(req_json),
+             "{\"filepath\":\"%s\",\"title\":\"Concurrency Test\",\"privacy\":\"UNLISTED\"}",
+             clip_path);
+
+    // Set delay to 150ms so threads remain active concurrently
+    api_set_upload_delay_ms(150);
+
+    int status = 0;
+    char headers[2048] = {0};
+    char body[4096] = {0};
+
+    // Fill the concurrency limit (API_MAX_CONCURRENT_UPLOADS = 4)
+    for (int i = 0; i < API_MAX_CONCURRENT_UPLOADS; i++) {
+        memset(body, 0, sizeof(body));
+        int rc = http_request(TEST_PORT, "POST", "/api/upload", req_json,
+                              "Content-Type: application/json\r\n",
+                              &status, headers, sizeof(headers), body, sizeof(body));
+        assert(rc == 0);
+        assert(status == 200);
+        cJSON* root = cJSON_Parse(body);
+        assert(root != NULL);
+        cJSON* st = cJSON_GetObjectItem(root, "status");
+        assert(st != NULL && strcmp(st->valuestring, "queued") == 0);
+        cJSON_Delete(root);
+    }
+
+    // 5th request must be rejected due to max concurrent uploads
+    memset(body, 0, sizeof(body));
+    int rc = http_request(TEST_PORT, "POST", "/api/upload", req_json,
+                          "Content-Type: application/json\r\n",
+                          &status, headers, sizeof(headers), body, sizeof(body));
+    assert(rc == 0);
+    cJSON* root = cJSON_Parse(body);
+    assert(root != NULL);
+    cJSON* succ = cJSON_GetObjectItem(root, "success");
+    assert(succ != NULL && cJSON_IsFalse(succ));
+    cJSON* err = cJSON_GetObjectItem(root, "error");
+    assert(err != NULL && strstr(err->valuestring, "concurrent") != NULL);
+    cJSON_Delete(root);
+
+    // Wait for uploads to complete
+    api_set_upload_delay_ms(0);
+    usleep(200000); // 200ms
+
+    // After workers finish, new uploads should be accepted again
+    memset(body, 0, sizeof(body));
+    rc = http_request(TEST_PORT, "POST", "/api/upload", req_json,
+                      "Content-Type: application/json\r\n",
+                      &status, headers, sizeof(headers), body, sizeof(body));
+    assert(rc == 0);
+    assert(status == 200);
+    root = cJSON_Parse(body);
+    assert(root != NULL);
+    cJSON* succ2 = cJSON_GetObjectItem(root, "success");
+    assert(succ2 != NULL && cJSON_IsTrue(succ2));
+    cJSON_Delete(root);
+
+    printf("  -> Concurrency limit properly enforced and rejected 5th upload with error!\n");
+}
+
 int main(void) {
     rm_rf(TEST_CONFIG_DIR);
     rm_rf(TEST_CAPTURES_DIR);
@@ -389,6 +538,9 @@ int main(void) {
     test_post_api_auth();
     test_post_api_upload();
     test_not_found_route();
+    test_oversized_content_length();
+    test_client_disconnect_and_sigpipe();
+    test_upload_concurrency_limit();
 
     printf("Stopping HTTP server...\n");
     server_stop();

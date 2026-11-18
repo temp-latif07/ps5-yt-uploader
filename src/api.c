@@ -21,6 +21,7 @@ static char s_captures_root[512] = {0};
 static pthread_mutex_t s_api_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int s_active_uploads = 0;
+static int s_upload_delay_ms = 0;
 static pthread_mutex_t s_upload_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t s_upload_cond = PTHREAD_COND_INITIALIZER;
 
@@ -257,6 +258,13 @@ static void* upload_worker_thread(void* arg) {
         return NULL;
     }
 
+    pthread_mutex_lock(&s_upload_mutex);
+    int delay = s_upload_delay_ms;
+    pthread_mutex_unlock(&s_upload_mutex);
+    if (delay > 0) {
+        usleep((useconds_t)delay * 1000);
+    }
+
     app_config_t cfg;
     if (config_load(&cfg) != 0) {
         notify_send("YouTube: Upload failed - config load error");
@@ -327,8 +335,25 @@ static void handle_api_upload(const char* req_body, char* resp_out, size_t max_r
         return;
     }
 
+    pthread_mutex_lock(&s_upload_mutex);
+    if (s_active_uploads >= API_MAX_CONCURRENT_UPLOADS) {
+        pthread_mutex_unlock(&s_upload_mutex);
+        cJSON_Delete(root);
+        snprintf(resp_out, max_resp, "{\"error\":\"Max concurrent uploads reached\",\"success\":false}");
+        return;
+    }
+    s_active_uploads++;
+    pthread_mutex_unlock(&s_upload_mutex);
+
     upload_task_t* task = calloc(1, sizeof(upload_task_t));
     if (!task) {
+        pthread_mutex_lock(&s_upload_mutex);
+        s_active_uploads--;
+        if (s_active_uploads == 0) {
+            pthread_cond_broadcast(&s_upload_cond);
+        }
+        pthread_mutex_unlock(&s_upload_mutex);
+
         cJSON_Delete(root);
         snprintf(resp_out, max_resp, "{\"error\":\"Out of memory\",\"success\":false}");
         return;
@@ -352,10 +377,6 @@ static void handle_api_upload(const char* req_body, char* resp_out, size_t max_r
     }
 
     cJSON_Delete(root);
-
-    pthread_mutex_lock(&s_upload_mutex);
-    s_active_uploads++;
-    pthread_mutex_unlock(&s_upload_mutex);
 
     pthread_t tid;
     pthread_attr_t attr;
@@ -410,12 +431,25 @@ int api_init(const char* captures_root) {
     return 0;
 }
 
+void api_set_upload_delay_ms(int ms) {
+    pthread_mutex_lock(&s_upload_mutex);
+    s_upload_delay_ms = (ms < 0) ? 0 : ms;
+    pthread_mutex_unlock(&s_upload_mutex);
+}
+
+int api_get_active_uploads(void) {
+    pthread_mutex_lock(&s_upload_mutex);
+    int count = s_active_uploads;
+    pthread_mutex_unlock(&s_upload_mutex);
+    return count;
+}
+
 void api_cleanup(void) {
-    // Wait up to 1 second for any pending upload worker threads to complete
+    // Wait up to 2 seconds for any pending upload worker threads to complete
     struct timeval now;
     gettimeofday(&now, NULL);
     struct timespec ts;
-    ts.tv_sec = now.tv_sec + 1;
+    ts.tv_sec = now.tv_sec + 2;
     ts.tv_nsec = now.tv_usec * 1000L;
 
     pthread_mutex_lock(&s_upload_mutex);
@@ -425,6 +459,7 @@ void api_cleanup(void) {
             break;
         }
     }
+    s_upload_delay_ms = 0;
     pthread_mutex_unlock(&s_upload_mutex);
 
     pthread_mutex_lock(&s_api_mutex);
