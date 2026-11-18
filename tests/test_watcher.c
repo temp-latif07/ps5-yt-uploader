@@ -158,6 +158,17 @@ static void test_scan_existing_clips(void) {
 
     free(clips);
 
+    // Trailing slash test on directory with direct files
+    char direct_root[512];
+    snprintf(direct_root, sizeof(direct_root), "%s/CUSA12345/", TEST_ROOT);
+    clips = NULL;
+    count = 0;
+    rc = scan_existing_clips(direct_root, &clips, &count);
+    assert(rc == 0);
+    assert(count == 3);
+    assert(strcmp(clips[0].title_id, "CUSA12345") == 0);
+    free(clips);
+
     // Empty folder test
     rm_rf(TEST_ROOT);
     mkdir(TEST_ROOT, 0777);
@@ -395,12 +406,50 @@ static void test_notifications_and_default_upload(void) {
     printf("  -> Notification dispatch and auto-upload notifications passed!\n");
 }
 
+static void stop_invoking_cb(const capture_clip_t* clip, void* userdata) {
+    (void)clip;
+    int* called = (int*)userdata;
+    *called = 1;
+    // Calling watcher_stop from within the worker thread's callback must not deadlock
+    watcher_stop();
+}
+
+static void test_stop_from_callback(void) {
+    printf("[Test 6] Testing watcher_stop called from within callback (deadlock avoidance)...\n");
+    rm_rf(TEST_ROOT);
+    mkdir(TEST_ROOT, 0777);
+
+    char dir_cusa[512];
+    snprintf(dir_cusa, sizeof(dir_cusa), "%s/CUSA77777", TEST_ROOT);
+    mkdir(dir_cusa, 0777);
+
+    char clip[512];
+    snprintf(clip, sizeof(clip), "%s/self_stop.mp4", dir_cusa);
+    create_file(clip, "self_stop_data", 14, 0);
+
+    int stopped_flag = 0;
+    watcher_set_poll_interval_ms(30);
+    watcher_init(TEST_ROOT, stop_invoking_cb, &stopped_flag);
+    watcher_start();
+
+    // Sleep enough for 2 scan cycles
+    for (int i = 0; i < 20 && !stopped_flag; i++) {
+        usleep(20 * 1000);
+    }
+
+    assert(stopped_flag == 1);
+    // An external watcher_stop call afterwards should also be safe and no-op
+    watcher_stop();
+    printf("  -> watcher_stop from callback passed without deadlock!\n");
+}
+
 int main(void) {
     test_scan_existing_clips();
     test_write_debouncing_logic();
     test_deduplication_logic();
     test_threaded_watcher_and_debouncing();
     test_notifications_and_default_upload();
+    test_stop_from_callback();
 
     // Clean up temporary directories
     rm_rf(TEST_ROOT);

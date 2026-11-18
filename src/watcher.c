@@ -83,7 +83,7 @@ int scan_existing_clips(const char* captures_root, capture_clip_t** clips_out, s
 
     struct dirent* entry;
     while ((entry = readdir(root_dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+        if (entry->d_name[0] == '.') {
             continue;
         }
 
@@ -102,7 +102,7 @@ int scan_existing_clips(const char* captures_root, capture_clip_t** clips_out, s
             }
             struct dirent* sub_entry;
             while ((sub_entry = readdir(subdir)) != NULL) {
-                if (!is_video_clip_file(sub_entry->d_name)) {
+                if (sub_entry->d_name[0] == '.' || !is_video_clip_file(sub_entry->d_name)) {
                     continue;
                 }
                 char filepath[1024];
@@ -114,8 +114,8 @@ int scan_existing_clips(const char* captures_root, capture_clip_t** clips_out, s
                 }
 
                 if (count >= capacity) {
-                    capacity *= 2;
-                    capture_clip_t* new_clips = realloc(clips, capacity * sizeof(capture_clip_t));
+                    size_t new_cap = capacity * 2;
+                    capture_clip_t* new_clips = realloc(clips, new_cap * sizeof(capture_clip_t));
                     if (!new_clips) {
                         free(clips);
                         closedir(subdir);
@@ -123,6 +123,7 @@ int scan_existing_clips(const char* captures_root, capture_clip_t** clips_out, s
                         return -1;
                     }
                     clips = new_clips;
+                    capacity = new_cap;
                 }
 
                 snprintf(clips[count].filepath, sizeof(clips[count].filepath), "%s", filepath);
@@ -138,19 +139,26 @@ int scan_existing_clips(const char* captures_root, capture_clip_t** clips_out, s
             }
 
             if (count >= capacity) {
-                capacity *= 2;
-                capture_clip_t* new_clips = realloc(clips, capacity * sizeof(capture_clip_t));
+                size_t new_cap = capacity * 2;
+                capture_clip_t* new_clips = realloc(clips, new_cap * sizeof(capture_clip_t));
                 if (!new_clips) {
                     free(clips);
                     closedir(root_dir);
                     return -1;
                 }
                 clips = new_clips;
+                capacity = new_cap;
             }
 
             snprintf(clips[count].filepath, sizeof(clips[count].filepath), "%s", subpath);
-            const char* slash = strrchr(captures_root, '/');
-            const char* bname = slash ? slash + 1 : captures_root;
+            char root_buf[512];
+            snprintf(root_buf, sizeof(root_buf), "%s", captures_root);
+            size_t rlen = strlen(root_buf);
+            while (rlen > 1 && root_buf[rlen - 1] == '/') {
+                root_buf[--rlen] = '\0';
+            }
+            const char* slash = strrchr(root_buf, '/');
+            const char* bname = slash ? slash + 1 : root_buf;
             if (bname[0] && strcasecmp(bname, "video") != 0 && strcasecmp(bname, "av_content") != 0) {
                 snprintf(clips[count].title_id, sizeof(clips[count].title_id), "%.31s", bname);
             } else {
@@ -350,20 +358,17 @@ int watcher_scan_once(void) {
         /* Size is identical across consecutive checks and size > 0 */
         node->stable_count++;
         if (node->stable_count >= 1) {
-            node->dispatched = 1;
-
             if (ready_count >= ready_cap) {
-                ready_cap = (ready_cap == 0) ? 8 : ready_cap * 2;
-                capture_clip_t* new_ready = realloc(ready_clips, ready_cap * sizeof(capture_clip_t));
-                if (new_ready) {
-                    ready_clips = new_ready;
-                    ready_clips[ready_count] = *clip;
-                    ready_count++;
+                size_t new_cap = (ready_cap == 0) ? 8 : ready_cap * 2;
+                capture_clip_t* new_ready = realloc(ready_clips, new_cap * sizeof(capture_clip_t));
+                if (!new_ready) {
+                    continue;
                 }
-            } else {
-                ready_clips[ready_count] = *clip;
-                ready_count++;
+                ready_clips = new_ready;
+                ready_cap = new_cap;
             }
+            ready_clips[ready_count++] = *clip;
+            node->dispatched = 1;
         }
     }
 
@@ -475,7 +480,11 @@ void watcher_stop(void) {
     pthread_mutex_unlock(&s_state_mutex);
 
     if (s_thread_spawned) {
-        pthread_join(s_thread, NULL);
+        if (!pthread_equal(pthread_self(), s_thread)) {
+            pthread_join(s_thread, NULL);
+        } else {
+            pthread_detach(s_thread);
+        }
         s_thread_spawned = 0;
     }
 
