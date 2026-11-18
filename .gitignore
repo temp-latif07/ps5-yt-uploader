@@ -5,6 +5,7 @@ cookies.txt
 *.log
 .superpowers/
 bin/
+dist/
 *.o
 docs/superpowers
 __pycache__/

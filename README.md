@@ -1,7 +1,7 @@
 # PS5 YouTube Uploader (`ps5-yt-uploader`)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Release](https://img.shields.io/badge/release-v1.0.0-blue.svg)](https://github.com/temp-latif07/ps5-yt-uploader/releases)
+[![Release](https://img.shields.io/badge/release-v1.0.2-blue.svg)](https://github.com/temp-latif07/ps5-yt-uploader/releases)
 [![Platform](https://img.shields.io/badge/platform-PlayStation%205-003791.svg)]()
 [![Target Firmware](https://img.shields.io/badge/firmware-12.20%20%7C%20y2JB%20Relapse-792ee5.svg)]()
 [![Payload Manager](https://img.shields.io/badge/Payload%20Manager-Compatible-2ea44f.svg)](payloads.json)
@@ -47,12 +47,13 @@ On jailbroken PS5 setups, PlayStation Network (PSN) telemetry and communication 
 ## Core Features
 
 - **Direct Scotty Resumable Upload Protocol:** Video captures stream directly from the console's internal SSD (`/user/av_content/video/`) to YouTube Studio ingestion servers using the resilient Scotty chunked upload protocol—bypassing Google Cloud API quotas (avoiding the standard 10,000 units/day ceiling) with zero GCP billing or credit card requirements.
-- **Dedicated Media Home Screen Tile:** Automatically registers a clean native tile in the PS5 home screen **Media** category via the embedded browser patch engine, launching a fullscreen 1080p dashboard navigable with the DualSense wireless controller.
-- **Autonomous Background Capture Watcher:** Background daemon continuously monitors `/user/av_content/video/` for newly saved MP4 and WebM clips captured via the DualSense "Create" button, instantly queuing and uploading them without interrupting active gameplay.
-- **Native PS5 System Notifications:** Fires native system on-screen notification toasts (`sceNotificationRequest`) displaying real-time upload progress, completion confirmations with shortened video URLs (`youtu.be/xxx`), or actionable error alerts.
+- **Manual Clip Selection & Curation First:** Automatic uploading is disabled by default to keep you in total control. Select any recorded clip, customize Title, Description, Privacy (*Public*, *Unlisted*, or *Private*), Audience (*Made for Kids* COPPA compliance), and optional Playlist ID before initiating upload.
+- **Dual Operating Modes:**
+  - **Mode A (Background Daemon):** Runs silently in the background on your PS5 via Payload Manager; accessible directly from your phone, tablet, or PC browser on local Wi-Fi (`http://<ps5-ip>:8888`).
+  - **Mode B (Homescreen Shortcut):** Direct TV launch via an offline WebKit AppCache shortcut package (`param.json` + `icon0.png`), modeled after `itsPLK/ps5-webkit-autoloader`.
+- **Native PS5 System Notifications:** Fires authentic system on-screen notification toasts via `sceKernelSendNotificationRequest` displaying real-time upload progress, completion confirmations with shortened video URLs (`youtu.be/xxx`), or actionable error alerts.
 - **Web Companion Pairing Dashboard (Port 8888):** Embedded lightweight HTTP server serving a responsive dashboard on port 8888. Displays a dynamic QR code for instant 10-second pairing with any smartphone or desktop browser on the local network.
-- **Flexible Privacy & Curation Controls:** Configure global upload defaults or curate individual clips directly from the TV UI or Web Companion (Title, Description, Tags, and Privacy: *Public*, *Unlisted*, or *Private*).
-- **Ultra-Lightweight Footprint:** Single self-contained C binary (~154 KB stripped ELF) consuming < 4 MB RAM and < 0.1% background CPU, guaranteeing zero frame drops during 60/120 FPS gaming sessions.
+- **Ultra-Lightweight Footprint:** Single self-contained C binary (~161 KB stripped ELF) consuming < 4 MB RAM and < 0.1% background CPU, guaranteeing zero frame drops during 60/120 FPS gaming sessions.
 
 ---
 
@@ -106,20 +107,48 @@ If you prefer launching payloads manually using standard ELF loaders (listening 
 Once the daemon is running, pair your YouTube account in seconds:
 
 1. **Access the Companion Dashboard:**
-   - On your smartphone or computer connected to the same Wi-Fi/LAN, open:
+   - On your smartphone, tablet, or computer connected to the same local Wi-Fi/LAN, navigate to:
      ```text
      http://<ps5-ip>:8888
      ```
-   - Alternatively, open the **YouTube Uploader** tile from the PS5 home screen **Media** tab to view the dynamic pairing QR code on your TV, and scan it with your phone's camera.
+   - Alternatively, launch the **YouTube Uploader** home screen shortcut on your PS5 to view the dashboard directly on your TV.
 2. **10-Second Account Pairing:**
    - Tap **Sign in with YouTube / Google**.
    - Authenticate in your trusted browser. The authentication token is exchanged and securely stored locally on the console's internal storage (`/data/youtube_uploader/config.json`).
    - No Google Cloud Console project, OAuth client secrets, or billing accounts required.
-3. **Upload Workflow:**
-   - **Autonomous Mode:** Simply press the DualSense **Create** button during gameplay and save a video capture. The watcher automatically picks up the video from `/user/av_content/video/`, queues it, and uploads it in the background using your default privacy settings.
-   - **Manual Curation Mode:** Visit the dashboard (`http://<ps5-ip>:8888` or the TV tile), browse recent captures with thumbnail previews, edit the title, description, tags, and privacy status, and click **Upload Now**.
-4. **On-Screen Confirmation:**
-   - Monitor live upload progress and receive a PS5 notification toast with the generated YouTube link when finished.
+3. **Manual Clip Curation & Upload Workflow:**
+   - Automatic uploading is **disabled by default**, giving you complete control over what gets published.
+   - In the Web Companion Studio, browse your console's recorded gameplay clips with live thumbnail previews.
+   - Click or tap any clip to open the **Upload Curation Modal**:
+     - **Title:** Enter custom video title (defaults to original filename).
+     - **Description:** Provide gameplay description, hashtags, or credits.
+     - **Privacy:** Select *Public*, *Unlisted*, or *Private*.
+     - **Audience (COPPA):** Choose whether the video is Made for Kids (*No, it's not made for kids* or *Yes, it's made for kids*).
+     - **Playlist ID (Optional):** Specify a YouTube Playlist ID (e.g. `PLxxxxxxxx`) to automatically categorize your upload.
+   - Click **Upload Now** to initiate direct Scotty resumable upload.
+4. **Autonomous Mode (Optional):**
+   - If you prefer hands-free uploading, you can toggle **Automatic Upload** ON in the Settings tab. The background watcher will then automatically detect and upload newly saved clips.
+5. **On-Screen Confirmation:**
+   - Watch live byte-level upload progress on the dashboard.
+   - Receive a native PS5 notification toast on the top-right of your TV screen with the shortened `youtu.be/<id>` link upon completion.
+
+---
+
+## Homescreen Shortcut Installation (The itsPLK Model)
+
+ELF payloads run headless in the background. To create a dedicated home screen shortcut tile on your PS5 dashboard:
+
+1. Generate the shortcut package:
+   ```bash
+   make shortcut
+   # or: python3 scripts/generate_shortcut.py --output dist/shortcut/PS5YT0001
+   ```
+2. Copy the resulting `dist/shortcut/PS5YT0001` folder to your PS5 at:
+   ```text
+   /user/app/PS5YT0001/
+   ```
+   *(Transfer via FTP payload or use the WebKit AppCache shortcut installer).*
+3. The PS5 ShellUI registers the tile with Title **YouTube Uploader** and custom icon `icon0.png`, launching directly to `http://127.0.0.1:8888`.
 
 ---
 
@@ -128,7 +157,7 @@ Once the daemon is running, pair your YouTube account in seconds:
 For testing, host simulation, or custom automation, `ps5-yt-uploader` supports command-line parameters:
 
 ```text
-ps5-yt-uploader v1.0.0 (PS5 YouTube Uploader)
+ps5-yt-uploader v1.0.2 (PS5 YouTube Uploader)
 Usage: ps5-youtube [options]
 
 Options:

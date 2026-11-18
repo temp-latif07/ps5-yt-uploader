@@ -24,7 +24,7 @@ TESTS_DIR := tests
 
 all: test $(BIN_DIR)/ps5-youtube-host
 
-test: test_version test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile test_e2e test_payload_repo
+test: test_version test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile test_shortcut test_e2e test_payload_repo
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
@@ -98,6 +98,12 @@ $(BIN_DIR)/test_media_tile: $(TESTS_DIR)/test_media_tile.c $(SRC_DIR)/media_tile
 test_media_tile: $(BIN_DIR) $(BIN_DIR)/test_media_tile
 	./$(BIN_DIR)/test_media_tile
 
+test_shortcut:
+	python3 tests/test_shortcut_generator.py
+
+shortcut:
+	python3 scripts/generate_shortcut.py
+
 test_e2e: $(BIN_DIR)/ps5-youtube-host
 	bash tests/test_e2e_integration.sh
 
@@ -108,6 +114,6 @@ release:
 	bash scripts/release.sh
 
 clean:
-	rm -rf $(BIN_DIR)
+	rm -rf $(BIN_DIR) dist
 
-.PHONY: all test test_version test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile test_e2e test_payload_repo release ps5 web_assets clean
+.PHONY: all test test_version test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile test_shortcut shortcut test_e2e test_payload_repo release ps5 web_assets clean
