@@ -8,7 +8,7 @@ SRC_DIR := src
 VENDOR_DIR := vendor
 TESTS_DIR := tests
 
-all: test_config test_crypto test_youtube
+all: test_config test_crypto test_youtube test_watcher
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
@@ -32,7 +32,13 @@ test_youtube: $(BIN_DIR) $(BIN_DIR)/test_youtube
 	wait $$SERVER_PID 2>/dev/null || true; \
 	exit $$TEST_EXIT
 
+$(BIN_DIR)/test_watcher: $(TESTS_DIR)/test_watcher.c $(SRC_DIR)/watcher.c $(SRC_DIR)/notify.c $(SRC_DIR)/youtube.c $(SRC_DIR)/http_client.c $(SRC_DIR)/crypto.c $(SRC_DIR)/config.c $(VENDOR_DIR)/cJSON.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+test_watcher: $(BIN_DIR) $(BIN_DIR)/test_watcher
+	./$(BIN_DIR)/test_watcher
+
 clean:
 	rm -rf $(BIN_DIR)
 
-.PHONY: all test_config test_crypto test_youtube clean
+.PHONY: all test_config test_crypto test_youtube test_watcher clean
