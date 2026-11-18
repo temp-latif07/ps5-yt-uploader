@@ -203,7 +203,7 @@ git push origin "${TAG}"
 RELEASE_NOTES=$(python3 "${REPO_ROOT}/scripts/extract_release_notes.py" "${TAG}" 2>/dev/null || echo "Release ${TAG} of PS5 YouTube Uploader.")
 
 echo "==> Step 9: Creating GitHub Release via gh CLI..."
-if command -v gh &>/dev/null && gh auth status &>/dev/null; then
+if command -v gh &>/dev/null && gh auth token &>/dev/null; then
     gh release create "${TAG}" \
         "${ELF_PATH}" \
         "${ELF_PATH}.sha256" \
