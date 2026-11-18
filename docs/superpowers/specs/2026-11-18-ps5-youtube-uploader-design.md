@@ -113,13 +113,17 @@ The user selected a phased MVP approach combining the best elements:
 ```
 
 ### Builder Architectural Calls Made
-1. **Daemon-Only Extraction (Stripping PShare's Heavy GUI):**
+1. **Pre-Bundled App Credentials (Zero-Config for End Users):**
+   - *Decision:* The application comes with a pre-configured, built-in Google OAuth Client ID and Secret bundled directly into the binary. End users never need to visit Google Cloud Console, register developer accounts, or create API credentials.
+   - *User Experience:* Plug-and-play. The user simply scans the QR code or visits `google.com/device`, enters the code, and taps "Allow" to sign in.
+   - *Power User Support:* An optional "Custom Client Credentials" override is provided in the advanced settings for users who wish to supply their own Google Cloud quota pool.
+2. **Daemon-Only Extraction (Stripping PShare's Heavy GUI):**
    - *Decision:* Rather than maintaining PShare's heavy SDL/FFmpeg native GUI in the Games tab, we extract *only* the core `pshared` filesystem watcher and networking daemon. All user interaction is consolidated into the lightweight WebKit companion (which serves both the PS5 fullscreen TV tile and phone/PC browsers).
    - *Impact:* Drops binary size from ~35 MB to < 1 MB, eliminates complex graphics/decoder dependencies, and keeps console memory usage near zero.
-2. **Minimal Web Bootstrap Pulled into Phase 1:**
+3. **Minimal Web Bootstrap Pulled into Phase 1:**
    - *Decision:* A barebones HTTP server for OAuth configuration is included in Phase 1 (MVP) rather than waiting for Phase 3.
-   - *Impact:* Eliminates the need for users to edit JSON files manually over FTP. Users can immediately open `http://<ps5-ip>:8888` on their phone to paste their Google Client ID, view the Device Code / QR code, and click "Upload".
-3. **Daemon Lifecycle Management:**
+   - *Impact:* Eliminates the need for users to edit JSON files manually over FTP. Users can immediately open `http://<ps5-ip>:8888` on their phone to view the Device Code / QR code, sign in, and click "Upload".
+4. **Daemon Lifecycle Management:**
    - *Decision:* The daemon will run as a standard background ELF payload loaded via port 9021 (`elfldr`) or community boot autoloaders alongside `kstuff-lite`. The Phase 2 Media tile acts as a clean shortcut to the running service.
 
 ### Phase 1: MVP - PShare Fork & YouTube Engine
