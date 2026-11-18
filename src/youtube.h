@@ -69,10 +69,12 @@ int youtube_stream_file(const app_config_t* cfg, const char* upload_url, const c
  * @param title        Video title
  * @param description  Video description
  * @param privacy      "PUBLIC", "UNLISTED", or "PRIVATE"
+ * @param made_for_kids 1 if made for kids, 0 if not
+ * @param playlist_id  Optional playlist ID (NULL or empty to omit)
  * @param result       Result structure receiving video ID, URL, status, and error
  * @return 0 on success, -1 on failure
  */
-int youtube_finalize_video(const app_config_t* cfg, const char* frontend_id, const char* scotty_id, const char* title, const char* description, const char* privacy, upload_result_t* result);
+int youtube_finalize_video(const app_config_t* cfg, const char* frontend_id, const char* scotty_id, const char* title, const char* description, const char* privacy, int made_for_kids, const char* playlist_id, upload_result_t* result);
 
 /**
  * High-level unified upload pipeline:
@@ -83,12 +85,14 @@ int youtube_finalize_video(const app_config_t* cfg, const char* frontend_id, con
  * @param title        Video title
  * @param description  Video description
  * @param privacy      "PUBLIC", "UNLISTED", or "PRIVATE"
+ * @param made_for_kids 1 if made for kids, 0 if not
+ * @param playlist_id  Optional playlist ID (NULL or empty to omit)
  * @param cb           Optional progress callback
  * @param userdata     User pointer passed to progress callback
  * @param result       Result structure receiving video ID, URL, status, and error
  * @return 0 on success, -1 on failure
  */
-int youtube_upload_clip(const app_config_t* cfg, const char* filepath, const char* title, const char* description, const char* privacy, upload_progress_cb cb, void* userdata, upload_result_t* result);
+int youtube_upload_clip(const app_config_t* cfg, const char* filepath, const char* title, const char* description, const char* privacy, int made_for_kids, const char* playlist_id, upload_progress_cb cb, void* userdata, upload_result_t* result);
 
 #ifdef __cplusplus
 }

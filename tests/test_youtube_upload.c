@@ -106,7 +106,7 @@ static void test_normal_upload_e2e(void) {
 
     test_progress_t progress = {0, 0, 0};
 
-    int rc = youtube_upload_clip(&cfg, SAMPLE_CLIP_PATH, "PS5 Spike Test Video", "Uploaded via PS5 YouTube Uploader", "UNLISTED", on_progress, &progress, &result);
+    int rc = youtube_upload_clip(&cfg, SAMPLE_CLIP_PATH, "PS5 Spike Test Video", "Uploaded via PS5 YouTube Uploader", "UNLISTED", 0, NULL, on_progress, &progress, &result);
 
     assert(rc == 0);
     assert(result.http_status == 200);
@@ -151,7 +151,7 @@ static void test_resume_on_midstream_drop(void) {
     upload_result_t result;
     memset(&result, 0, sizeof(result));
 
-    rc = youtube_finalize_video(&cfg, frontend_id, scotty_id, "Resumed Video", "Resumed Description", "UNLISTED", &result);
+    rc = youtube_finalize_video(&cfg, frontend_id, scotty_id, "Resumed Video", "Resumed Description", "UNLISTED", 0, NULL, &result);
     assert(rc == 0);
     assert(result.http_status == 200);
     assert(strcmp(result.video_id, "mock_vid_98765") == 0);
@@ -194,7 +194,7 @@ static void test_unauthenticated_error_handling(void) {
         upload_result_t result;
         memset(&result, 0, sizeof(result));
 
-        int rc = youtube_upload_clip(&cfg, SAMPLE_CLIP_PATH, "Expired Test", "Desc", "UNLISTED", NULL, NULL, &result);
+        int rc = youtube_upload_clip(&cfg, SAMPLE_CLIP_PATH, "Expired Test", "Desc", "UNLISTED", 0, NULL, NULL, NULL, &result);
         assert(rc != 0);
         assert(result.http_status == 401);
         assert(strcmp(result.error_message, "UNAUTHENTICATED: session token or cookies expired") == 0);
@@ -210,7 +210,7 @@ static void test_unauthenticated_error_handling(void) {
         upload_result_t result;
         memset(&result, 0, sizeof(result));
 
-        int rc = youtube_upload_clip(&cfg, SAMPLE_CLIP_PATH, "Expired Cookie Test", "Desc", "UNLISTED", NULL, NULL, &result);
+        int rc = youtube_upload_clip(&cfg, SAMPLE_CLIP_PATH, "Expired Cookie Test", "Desc", "UNLISTED", 0, NULL, NULL, NULL, &result);
         assert(rc != 0);
         assert(result.http_status == 401);
         assert(strcmp(result.error_message, "UNAUTHENTICATED: session token or cookies expired") == 0);
@@ -247,6 +247,22 @@ static void test_unauthenticated_error_handling(void) {
     printf("  -> Passed! All UNAUTHENTICATED error paths handled cleanly without retrying.\n");
 }
 
+static void test_curated_metadata_upload(void) {
+    printf("[Test 4] Testing curated metadata upload with made_for_kids and playlist...\n");
+    app_config_t cfg;
+    setup_valid_config(&cfg);
+
+    const char* frontend_id = "test_curated_frontend_003";
+    upload_result_t result;
+    memset(&result, 0, sizeof(result));
+
+    int rc = youtube_finalize_video(&cfg, frontend_id, "mock_scotty_resource_12345", "Curated Title", "Curated Desc", "PUBLIC", 1, "PL_TEST_123", &result);
+    assert(rc == 0);
+    assert(result.http_status == 200);
+    assert(strcmp(result.video_id, "mock_vid_98765") == 0);
+    printf("  -> Passed! Made for Kids & Playlist metadata verified by mock server.\n");
+}
+
 int main(void) {
     ensure_mock_server_running();
 
@@ -261,6 +277,7 @@ int main(void) {
     test_resume_on_midstream_drop();
     test_resume_full_bytes_received();
     test_unauthenticated_error_handling();
+    test_curated_metadata_upload();
 
     cleanup_mock_server();
     printf("Task 3 YouTube Engine Tests Passed Successfully!\n");

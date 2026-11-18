@@ -248,7 +248,7 @@ int watcher_process_clip_upload(const capture_clip_t* clip) {
     const char* privacy = cfg.default_privacy[0] ? cfg.default_privacy : "UNLISTED";
     int rc = youtube_upload_clip(&cfg, clip->filepath, title,
                                  "Uploaded from PlayStation 5 via PS5 YouTube Uploader",
-                                 privacy, NULL, NULL, &result);
+                                 privacy, 0, NULL, NULL, NULL, &result);
 
     if (rc == 0 && result.http_status == 200) {
         char msg[256];

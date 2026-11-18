@@ -235,6 +235,21 @@ class MockYouTubeHandler(BaseHTTPRequestHandler):
                 self.send_cors_and_headers(400, {"Content-Type": "application/json"}, err_body)
                 return
 
+            frontend_id = data.get("frontendUploadId", "")
+            if "test_curated" in frontend_id:
+                initial_meta = data.get("initialMetadata", {})
+                audience = initial_meta.get("audience", {})
+                if audience.get("madeForKids") is not True:
+                    err_body = json.dumps({"error": {"code": 400, "message": "Missing or invalid madeForKids in audience"}}).encode("utf-8")
+                    self.send_cors_and_headers(400, {"Content-Type": "application/json"}, err_body)
+                    return
+                add_to_pl = data.get("addToPlaylist", {})
+                playlist_ids = add_to_pl.get("addToPlaylistIds", [])
+                if "PL_TEST_123" not in playlist_ids:
+                    err_body = json.dumps({"error": {"code": 400, "message": "Missing PL_TEST_123 in addToPlaylistIds"}}).encode("utf-8")
+                    self.send_cors_and_headers(400, {"Content-Type": "application/json"}, err_body)
+                    return
+
             resp_body = json.dumps({
                 "videoId": "mock_vid_98765"
             }).encode("utf-8")

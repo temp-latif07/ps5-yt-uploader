@@ -422,7 +422,7 @@ int youtube_stream_file(const app_config_t* cfg, const char* upload_url, const c
     return -1;
 }
 
-int youtube_finalize_video(const app_config_t* cfg, const char* frontend_id, const char* scotty_id, const char* title, const char* description, const char* privacy, upload_result_t* result) {
+int youtube_finalize_video(const app_config_t* cfg, const char* frontend_id, const char* scotty_id, const char* title, const char* description, const char* privacy, int made_for_kids, const char* playlist_id, upload_result_t* result) {
     g_last_http_status = 0;
     g_last_error_message[0] = '\0';
 
@@ -491,7 +491,19 @@ int youtube_finalize_video(const app_config_t* cfg, const char* frontend_id, con
     cJSON_AddStringToObject(priv_obj, "newPrivacy", priv);
     cJSON_AddItemToObject(initial_metadata, "privacy", priv_obj);
 
+    cJSON* audience_obj = cJSON_CreateObject();
+    cJSON_AddBoolToObject(audience_obj, "madeForKids", made_for_kids ? 1 : 0);
+    cJSON_AddItemToObject(initial_metadata, "audience", audience_obj);
+
     cJSON_AddItemToObject(root, "initialMetadata", initial_metadata);
+
+    if (playlist_id && *playlist_id) {
+        cJSON* add_to_playlist = cJSON_CreateObject();
+        cJSON* playlist_ids = cJSON_CreateArray();
+        cJSON_AddItemToArray(playlist_ids, cJSON_CreateString(playlist_id));
+        cJSON_AddItemToObject(add_to_playlist, "addToPlaylistIds", playlist_ids);
+        cJSON_AddItemToObject(root, "addToPlaylist", add_to_playlist);
+    }
 
     char* body_json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -590,7 +602,7 @@ int youtube_finalize_video(const app_config_t* cfg, const char* frontend_id, con
     return 0;
 }
 
-int youtube_upload_clip(const app_config_t* cfg, const char* filepath, const char* title, const char* description, const char* privacy, upload_progress_cb cb, void* userdata, upload_result_t* result) {
+int youtube_upload_clip(const app_config_t* cfg, const char* filepath, const char* title, const char* description, const char* privacy, int made_for_kids, const char* playlist_id, upload_progress_cb cb, void* userdata, upload_result_t* result) {
     if (!result) return -1;
     memset(result, 0, sizeof(*result));
 
@@ -649,7 +661,7 @@ int youtube_upload_clip(const app_config_t* cfg, const char* filepath, const cha
     }
 
     // Step 3: Finalize Video
-    if (youtube_finalize_video(cfg, frontend_id, scotty_id, title, description, privacy, result) != 0) {
+    if (youtube_finalize_video(cfg, frontend_id, scotty_id, title, description, privacy, made_for_kids, playlist_id, result) != 0) {
         return -1;
     }
 

@@ -298,7 +298,7 @@ static void* upload_worker_thread(void* arg) {
     const char* desc = task->description[0] ? task->description :
                        "Uploaded from PlayStation 5 via PS5 YouTube Uploader";
 
-    int rc = youtube_upload_clip(&cfg, task->filepath, title, desc, privacy, NULL, NULL, &result);
+    int rc = youtube_upload_clip(&cfg, task->filepath, title, desc, privacy, 0, NULL, NULL, NULL, &result);
     if (rc == 0 && result.http_status == 200) {
         char msg[256];
         const char* url = result.youtube_url[0] ? result.youtube_url : result.video_id;
