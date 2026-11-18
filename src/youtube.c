@@ -260,8 +260,8 @@ int youtube_stream_file(const app_config_t* cfg, const char* upload_url, const c
     int retry_count = 0;
     const int max_retries = 5;
 
-    while (current_offset < total_size) {
-        size_t remaining = total_size - current_offset;
+    while (current_offset <= total_size) {
+        size_t remaining = (total_size >= current_offset) ? (total_size - current_offset) : 0;
         size_t chunk_len = (remaining > g_chunk_size) ? g_chunk_size : remaining;
         int is_final = (current_offset + chunk_len >= total_size);
 
@@ -302,9 +302,14 @@ int youtube_stream_file(const app_config_t* cfg, const char* upload_url, const c
         req.url = upload_url;
         req.headers = headers;
         req.header_count = h_idx;
-        req.body_filepath = filepath;
-        req.file_offset = current_offset;
-        req.file_length = chunk_len;
+        if (chunk_len > 0) {
+            req.body_filepath = filepath;
+            req.file_offset = current_offset;
+            req.file_length = chunk_len;
+        } else {
+            req.body = "";
+            req.body_len = 0;
+        }
         req.progress_cb = (http_progress_cb)cb;
         req.userdata = userdata;
         req.timeout_sec = 15;
@@ -375,19 +380,31 @@ int youtube_stream_file(const app_config_t* cfg, const char* upload_url, const c
         q_req.url = upload_url;
         q_req.headers = q_headers;
         q_req.header_count = q_idx;
+        q_req.body = "";
+        q_req.body_len = 0;
         q_req.timeout_sec = 10;
 
         http_response_t q_resp;
         http_response_init(&q_resp);
 
         int q_rc = http_client_request(&q_req, &q_resp);
+
+        // Review Focus #2 / Issue 5: If query returns 401, halt immediately!
+        if (q_rc == 0 && q_resp.status_code == 401) {
+            g_last_http_status = 401;
+            snprintf(g_last_error_message, sizeof(g_last_error_message), "%s", "UNAUTHENTICATED: session token or cookies expired");
+            http_response_cleanup(&q_resp);
+            return -1;
+        }
+
         if (q_rc == 0 && (q_resp.status_code == 200 || q_resp.status_code == 201)) {
             const char* status_header = http_response_get_header(&q_resp, "x-goog-upload-status");
             if (status_header && strcasecmp(status_header, "final") == 0) {
-                // Server already finalized
-                parse_scotty_resource_id(q_resp.body, scotty_id_out, max_len);
-                http_response_cleanup(&q_resp);
-                return 0;
+                // Server already finalized - verify return code of parse_scotty_resource_id (Issue 2)
+                if (parse_scotty_resource_id(q_resp.body, scotty_id_out, max_len) == 0) {
+                    http_response_cleanup(&q_resp);
+                    return 0;
+                }
             }
 
             const char* size_recvd_str = http_response_get_header(&q_resp, "x-goog-upload-size-received");
@@ -395,6 +412,7 @@ int youtube_stream_file(const app_config_t* cfg, const char* upload_url, const c
                 size_t recvd = (size_t)strtoull(size_recvd_str, NULL, 10);
                 if (recvd <= total_size) {
                     current_offset = recvd; // Resume from byte offset reported by Scotty
+                    // Note: if recvd == total_size, next loop iteration will send a 0-length "upload, finalize" chunk at offset total_size (Issue 2)
                 }
             }
         }
@@ -411,8 +429,8 @@ int youtube_finalize_video(const app_config_t* cfg, const char* frontend_id, con
     if (!cfg || !result) return -1;
     memset(result, 0, sizeof(*result));
 
-    // Review Focus #2: check credentials
-    if (!cfg->session_token[0] || strcmp(cfg->session_token, "EXPIRED_TOKEN") == 0 || strcmp(cfg->session_token, "INVALID_TOKEN") == 0) {
+    // Review Focus #2 / Issue 3: check empty credentials only (no test mock sentinel string checks)
+    if (!cfg->session_token[0]) {
         result->http_status = 401;
         snprintf(result->error_message, sizeof(result->error_message), "%s", "UNAUTHENTICATED: session token or cookies expired");
         return -1;
@@ -582,8 +600,8 @@ int youtube_upload_clip(const app_config_t* cfg, const char* filepath, const cha
         return -1;
     }
 
-    // Review Focus #2: Fast failure for invalid credentials
-    if (!cfg->session_token[0] || strcmp(cfg->session_token, "EXPIRED_TOKEN") == 0 || strcmp(cfg->session_token, "INVALID_TOKEN") == 0) {
+    // Review Focus #2 / Issue 3: Fast failure for empty credentials
+    if (!cfg->session_token[0]) {
         result->http_status = 401;
         snprintf(result->error_message, sizeof(result->error_message), "%s", "UNAUTHENTICATED: session token or cookies expired");
         return -1;

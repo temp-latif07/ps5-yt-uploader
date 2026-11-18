@@ -1,6 +1,6 @@
 CC ?= clang
 CFLAGS ?= -Wall -Wextra -std=c99 -Iinclude -Isrc -Ivendor -pthread -g
-LDFLAGS ?= -pthread
+LDFLAGS ?= -pthread -lcurl
 
 
 BIN_DIR := bin

@@ -78,12 +78,16 @@ class MockYouTubeHandler(BaseHTTPRequestHandler):
             frontend_id = data.get("frontendUploadId", "")
             session_id = f"sess_{len(sessions) + 1}_{frontend_id}"
             simulate_drop = ("simulate_drop" in frontend_id or "drop" in frontend_id)
+            drop_full = ("drop_full" in frontend_id)
+            query_401 = ("query_401" in frontend_id)
 
             sessions[session_id] = {
                 "frontend_id": frontend_id,
                 "bytes_received": 0,
                 "data": bytearray(),
                 "simulate_drop": simulate_drop,
+                "drop_full": drop_full,
+                "query_401": query_401,
                 "drop_occurred": False,
                 "finalized": False
             }
@@ -123,6 +127,16 @@ class MockYouTubeHandler(BaseHTTPRequestHandler):
 
             # Query offset command
             if "query" in cmd:
+                if session.get("query_401"):
+                    err_body = json.dumps({
+                        "error": {
+                            "code": 401,
+                            "message": "UNAUTHENTICATED: session token or cookies expired"
+                        }
+                    }).encode("utf-8")
+                    self.send_cors_and_headers(401, {"Content-Type": "application/json"}, err_body)
+                    return
+
                 resp_headers = {
                     "x-goog-upload-status": "final" if session["finalized"] else "active",
                     "x-goog-upload-size-received": str(session["bytes_received"]),
@@ -137,10 +151,16 @@ class MockYouTubeHandler(BaseHTTPRequestHandler):
 
                 # Check for simulated mid-stream network drop
                 if session["simulate_drop"] and not session["drop_occurred"]:
-                    # Read partial chunk (up to 32768 bytes or half), update bytes_received, then sever socket
-                    drop_bytes = min(32768, content_len // 2) if content_len > 1 else content_len
-                    partial = self.rfile.read(drop_bytes)
-                    session["data"].extend(partial)
+                    if session.get("drop_full"):
+                        # Read entire chunk, then drop before responding
+                        chunk = self.rfile.read(content_len) if content_len > 0 else b""
+                        session["data"].extend(chunk)
+                    else:
+                        # Read partial chunk (up to 32768 bytes or half), update bytes_received, then sever socket
+                        drop_bytes = min(32768, content_len // 2) if content_len > 1 else content_len
+                        partial = self.rfile.read(drop_bytes)
+                        session["data"].extend(partial)
+
                     session["bytes_received"] = len(session["data"])
                     session["drop_occurred"] = True
 
@@ -225,8 +245,13 @@ class MockYouTubeHandler(BaseHTTPRequestHandler):
         self.send_cors_and_headers(404, {}, b'{"error": "endpoint not found"}')
 
 
+class QuietHTTPServer(HTTPServer):
+    def handle_error(self, request, client_address):
+        # Ignore broken pipe / connection reset during intentional disconnect simulations
+        pass
+
 def run():
-    server = HTTPServer(("127.0.0.1", PORT), MockYouTubeHandler)
+    server = QuietHTTPServer(("127.0.0.1", PORT), MockYouTubeHandler)
     # Output ready message for tests
     sys.stdout.write(f"MOCK_YOUTUBE_SERVER_READY:{PORT}\n")
     sys.stdout.flush()

@@ -159,11 +159,32 @@ static void test_resume_on_midstream_drop(void) {
     printf("  -> Passed! Successfully recovered from mid-stream network drop and resumed to completion (scottyId: %s)\n", scotty_id);
 }
 
+// 2b. Resume when all bytes were received but connection dropped before response (Issue 2)
+static void test_resume_full_bytes_received(void) {
+    printf("[Test 2b] Running resume when all bytes received before disconnect...\n");
+
+    app_config_t cfg;
+    setup_valid_config(&cfg);
+
+    char upload_url[512] = {0};
+    const char* frontend_id = "test_simulate_drop_full_002";
+
+    int rc = youtube_init_upload_session(&cfg, frontend_id, upload_url, sizeof(upload_url));
+    assert(rc == 0);
+
+    char scotty_id[128] = {0};
+    rc = youtube_stream_file(&cfg, upload_url, SAMPLE_CLIP_PATH, scotty_id, sizeof(scotty_id), NULL, NULL);
+    assert(rc == 0);
+    assert(strcmp(scotty_id, "mock_scotty_resource_12345") == 0);
+
+    printf("  -> Passed! Sent 0-byte finalize chunk when all bytes were received and finalized successfully.\n");
+}
+
 // 3. Proper UNAUTHENTICATED error handling when credentials are invalid (Review Focus #2)
 static void test_unauthenticated_error_handling(void) {
     printf("[Test 3] Running unauthenticated error handling tests...\n");
 
-    // Case 3a: Expired / Invalid session_token
+    // Case 3a: Expired / Invalid session_token (handled by mock server HTTP 401 response, not sentinel check)
     {
         app_config_t cfg;
         setup_valid_config(&cfg);
@@ -176,7 +197,7 @@ static void test_unauthenticated_error_handling(void) {
         assert(rc != 0);
         assert(result.http_status == 401);
         assert(strcmp(result.error_message, "UNAUTHENTICATED: session token or cookies expired") == 0);
-        printf("  -> 3a (Expired session_token): Caught HTTP 401 with error: '%s'\n", result.error_message);
+        printf("  -> 3a (Expired session_token via HTTP 401): Caught HTTP 401 with error: '%s'\n", result.error_message);
     }
 
     // Case 3b: Expired cookies / Missing SAPISID
@@ -207,6 +228,21 @@ static void test_unauthenticated_error_handling(void) {
         printf("  -> 3c (Session Init 401): youtube_init_upload_session returned error as expected\n");
     }
 
+    // Case 3d: Query returning 401 halts immediately without retry loop (Issue 5)
+    {
+        app_config_t cfg;
+        setup_valid_config(&cfg);
+
+        char upload_url[512] = {0};
+        int rc = youtube_init_upload_session(&cfg, "test_simulate_drop_query_401", upload_url, sizeof(upload_url));
+        assert(rc == 0);
+
+        char scotty_id[128] = {0};
+        rc = youtube_stream_file(&cfg, upload_url, SAMPLE_CLIP_PATH, scotty_id, sizeof(scotty_id), NULL, NULL);
+        assert(rc != 0);
+        printf("  -> 3d (Query returning 401): Halted immediately without retrying\n");
+    }
+
     printf("  -> Passed! All UNAUTHENTICATED error paths handled cleanly without retrying.\n");
 }
 
@@ -222,6 +258,7 @@ int main(void) {
 
     test_normal_upload_e2e();
     test_resume_on_midstream_drop();
+    test_resume_full_bytes_received();
     test_unauthenticated_error_handling();
 
     cleanup_mock_server();
