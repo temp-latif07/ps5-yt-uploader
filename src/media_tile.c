@@ -66,6 +66,29 @@ static int is_valid_table_name(const char* name) {
 }
 
 /**
+ * Validates that launch URL starts with http:// or https:// and contains no shell metacharacters.
+ */
+static int is_valid_launch_url(const char* url) {
+    if (!url) return 0;
+    if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0) {
+        return 0;
+    }
+    for (const char* p = url; *p != '\0'; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c <= 32 || c >= 127) {
+            return 0; /* No whitespace, control chars, or non-ASCII */
+        }
+        if (c == '"' || c == '\'' || c == '`' || c == '$' || c == '\\' ||
+            c == ';' || c == '&'  || c == '|' || c == '<' || c == '>'  ||
+            c == '(' || c == ')'  || c == '{' || c == '}' || c == '*'  ||
+            c == '?' || c == '['  || c == ']' || c == '^' || c == '!') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/**
  * Ensures required columns exist in the target table (for legacy database schemas).
  */
 static int ensure_table_columns(sqlite3* db, const char* tbl_name) {
@@ -134,6 +157,7 @@ int media_tile_register(const char* db_path, const char* app_title, const char* 
         if (db) sqlite3_close(db);
         return -1;
     }
+    sqlite3_busy_timeout(db, 5000);
 
     /* Find all matching tbl_appbrowse_% tables */
     const char* find_tables_sql =
@@ -150,7 +174,7 @@ int media_tile_register(const char* db_path, const char* app_title, const char* 
 
     while (sqlite3_step(stmt) == SQLITE_ROW && table_count < MAX_TABLES) {
         const char* name = (const char*)sqlite3_column_text(stmt, 0);
-        if (name && is_valid_table_name(name)) {
+        if (name && strlen(name) < TABLE_NAME_MAX && is_valid_table_name(name)) {
             snprintf(tables[table_count], sizeof(tables[table_count]), "%s", name);
             table_count++;
         }
@@ -276,6 +300,7 @@ int media_tile_unregister(const char* db_path, const char* title_id) {
         if (db) sqlite3_close(db);
         return -1;
     }
+    sqlite3_busy_timeout(db, 5000);
 
     /* Find all matching tbl_appbrowse_% tables */
     const char* find_tables_sql =
@@ -292,7 +317,7 @@ int media_tile_unregister(const char* db_path, const char* title_id) {
 
     while (sqlite3_step(stmt) == SQLITE_ROW && table_count < MAX_TABLES) {
         const char* name = (const char*)sqlite3_column_text(stmt, 0);
-        if (name && is_valid_table_name(name)) {
+        if (name && strlen(name) < TABLE_NAME_MAX && is_valid_table_name(name)) {
             snprintf(tables[table_count], sizeof(tables[table_count]), "%s", name);
             table_count++;
         }
@@ -342,13 +367,15 @@ int media_tile_unregister(const char* db_path, const char* title_id) {
 int media_tile_launch_browser(const char* launch_url) {
     const char* url = (launch_url && *launch_url) ? launch_url : MEDIA_TILE_DEFAULT_LAUNCH_URL;
 
+    if (!is_valid_launch_url(url)) {
+        return -1;
+    }
+
 #if defined(__FreeBSD__) || defined(PS5)
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "ps5-web-browser-fullscreen \"%s\" &", url);
     return system(cmd);
 #else
-    (void)url;
-    /* Host environment fallback / mock */
     return 0;
 #endif
 }

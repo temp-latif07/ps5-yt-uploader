@@ -283,14 +283,29 @@ static void test_media_tile_missing_columns_migration(void) {
 }
 
 static void test_media_tile_browser_launch(void) {
-    printf("[Test 7] Testing media_tile_launch_browser...\n");
+    printf("[Test 7] Testing media_tile_launch_browser and URL security validation...\n");
     int rc = media_tile_launch_browser(NULL);
     assert(rc == 0);
 
     rc = media_tile_launch_browser("http://127.0.0.1:8888");
     assert(rc == 0);
 
-    printf("  -> Browser launch mock verified!\n");
+    rc = media_tile_launch_browser("https://127.0.0.1:8888/dashboard");
+    assert(rc == 0);
+
+    /* Invalid scheme rejection */
+    assert(media_tile_launch_browser("ftp://127.0.0.1:8888") == -1);
+    assert(media_tile_launch_browser("javascript:alert(1)") == -1);
+    assert(media_tile_launch_browser("file:///etc/passwd") == -1);
+
+    /* Shell injection rejection */
+    assert(media_tile_launch_browser("http://127.0.0.1:8888\"; rm -rf /") == -1);
+    assert(media_tile_launch_browser("http://127.0.0.1:8888 && reboot") == -1);
+    assert(media_tile_launch_browser("http://127.0.0.1:8888`id`") == -1);
+    assert(media_tile_launch_browser("http://127.0.0.1:8888$(whoami)") == -1);
+    assert(media_tile_launch_browser("http://127.0.0.1:8888 | ls") == -1);
+
+    printf("  -> Browser launch mock and shell security validation verified!\n");
 }
 
 int main(void) {
