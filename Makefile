@@ -24,7 +24,7 @@ TESTS_DIR := tests
 
 all: test $(BIN_DIR)/ps5-youtube-host
 
-test: test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile test_e2e
+test: test_version test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile test_e2e
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
@@ -41,6 +41,12 @@ ps5: $(BIN_DIR) $(SRC_DIR)/web_assets.h $(wildcard $(SRC_DIR)/*.c) $(VENDOR_DIR)
 	$(CC) $(PS5_CFLAGS) $(wildcard $(SRC_DIR)/*.c) $(VENDOR_DIR)/cJSON.c -o $(BIN_DIR)/ps5-youtube.elf $(PS5_LDFLAGS)
 	@if [ -n "$(LLVM_STRIP)" ]; then $(LLVM_STRIP) $(BIN_DIR)/ps5-youtube.elf 2>/dev/null || true; fi
 	@echo "Built $(BIN_DIR)/ps5-youtube.elf size: $$(ls -lh $(BIN_DIR)/ps5-youtube.elf | awk '{print $$5}')"
+
+$(BIN_DIR)/test_version: $(TESTS_DIR)/test_version_cli.c
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
+test_version: $(BIN_DIR)/ps5-youtube-host $(BIN_DIR)/test_version
+	./$(BIN_DIR)/test_version
 
 test_config: $(BIN_DIR) $(TESTS_DIR)/test_config.c $(SRC_DIR)/config.c $(VENDOR_DIR)/cJSON.c
 	$(CC) $(CFLAGS) $(TESTS_DIR)/test_config.c $(SRC_DIR)/config.c $(VENDOR_DIR)/cJSON.c -o $(BIN_DIR)/test_config $(LDFLAGS)
@@ -93,4 +99,4 @@ test_e2e: $(BIN_DIR)/ps5-youtube-host
 clean:
 	rm -rf $(BIN_DIR)
 
-.PHONY: all test test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile test_e2e ps5 web_assets clean
+.PHONY: all test test_version test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile test_e2e ps5 web_assets clean

@@ -8,6 +8,7 @@
 #include "youtube.h"
 #include "notify.h"
 #include "cJSON.h"
+#include "version.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,6 +56,8 @@ static void handle_api_status(const char* req_body, char* resp_out, size_t max_r
     cJSON_AddBoolToObject(root, "auto_upload", (rc == 0) ? cfg.auto_upload : 0);
     cJSON_AddStringToObject(root, "default_privacy",
                            (rc == 0 && cfg.default_privacy[0]) ? cfg.default_privacy : "UNLISTED");
+    cJSON_AddStringToObject(root, "version", APP_VERSION);
+    cJSON_AddStringToObject(root, "app_name", APP_NAME);
 
     char* json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

@@ -9,6 +9,7 @@
 #include "server.h"
 #include "api.h"
 #include "media_tile.h"
+#include "version.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,9 +37,15 @@ static void on_clip_ready(const capture_clip_t* clip, void* userdata) {
     }
 }
 
+static void print_version(void) {
+    printf("%s v%s (%s)\n", APP_NAME, APP_VERSION, APP_DISPLAY_NAME);
+}
+
 static void print_usage(const char* prog) {
-    printf("Usage: %s [options]\n", prog);
+    printf("%s v%s - %s\n", APP_NAME, APP_VERSION, APP_DISPLAY_NAME);
+    printf("Usage: %s [options]\n", prog ? prog : APP_NAME);
     printf("Options:\n");
+    printf("  -v, --version        Show version information\n");
     printf("  --port <p>           Port to listen on (default: %d)\n", DEFAULT_PORT);
     printf("  --data-dir <dir>     Persistent storage directory (default: %s)\n", DEFAULT_DATA_DIR);
     printf("  --captures-dir <dir> Video captures path (default: %s)\n", DEFAULT_CAPTURES_DIR);
@@ -67,6 +74,9 @@ int main(int argc, char* argv[]) {
             app_db = argv[++i];
         } else if (strcmp(argv[i], "--no-tile") == 0) {
             no_tile = 1;
+        } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+            print_version();
+            return 0;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;

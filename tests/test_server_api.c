@@ -203,6 +203,14 @@ static void test_get_api_status_initial(void) {
     assert(priv != NULL && cJSON_IsString(priv));
     assert(strcmp(priv->valuestring, "UNLISTED") == 0);
 
+    cJSON* ver = cJSON_GetObjectItem(root, "version");
+    assert(ver != NULL && cJSON_IsString(ver));
+    assert(strcmp(ver->valuestring, "1.0.0") == 0);
+
+    cJSON* app = cJSON_GetObjectItem(root, "app_name");
+    assert(app != NULL && cJSON_IsString(app));
+    assert(strcmp(app->valuestring, "ps5-yt-uploader") == 0);
+
     cJSON_Delete(root);
     printf("  -> Initial GET /api/status passed! Body: %s\n", body);
 }
