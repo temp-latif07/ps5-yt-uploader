@@ -6,7 +6,19 @@ What's new in ps5-yt-uploader, written for humans.
 
 ## Unreleased
 
-Planned improvements and upcoming fixes for subsequent releases.
+**New**
+- **Manual Clip Selection & Metadata Curation Studio.** Automatic background uploading is now disabled by default, giving users complete manual control. Select any recorded clip from your console and customize its Title, Description, Privacy (*Public*, *Unlisted*, or *Private*), Audience (*Made for Kids* COPPA compliance), and optional YouTube Playlist ID before initiating upload.
+- **Homescreen Shortcut Generator (`itsPLK` Model).** Added `scripts/generate_shortcut.py` and `make shortcut` to produce an offline WebKit AppCache homescreen application package (`sce_sys/param.json` + `icon0.png`) targeting Title ID `PS5YT0001`, enabling a native home screen tile that boots directly into the local Web Companion Studio.
+- **Authentic Dual-Mode Architecture.** Documented both operating models in README: running as a headless background daemon managed via PS5 Payload Manager, with optional TV home screen tile installation via the WebKit AppCache shortcut format.
+
+**Fixes**
+- **Authentic PS5 Toast Notifications (`libkernel`).** Replaced non-existent `sceNotificationRequest` with authentic Sony `libkernel` ABI `sceKernelSendNotificationRequest`, ensuring upload progress, completion links, and error toasts reliably render in the top-right corner of the PS5 TV display.
+- **Darwin SDK Header Sanitization & Symbol Isolation.** Resolved cross-compilation symbol pollution on macOS hosts where Apple SDK headers redirected standard POSIX APIs to Darwin-specific symbol aliases (`_stat$INODE64`, `_opendir$INODE64`, `_close`, `_DefaultRuneLocale`, `__maskrune`, `__memcpy_chk`, `__sprintf_chk`). Created `include/ps5_shim.h` to enforce clean-room C99/POSIX symbol linkage for FreeBSD 12 ELF payloads, eliminating `elfldr` runtime dynamic linker termination.
+- **Eliminated Host SQLite3 Runtime Dependency.** Stubbed out direct MMS SQLite3 database injections under PS5 compilation targets, preventing payload startup crashes on locked WAL-mode system databases.
+
+**Behind the scenes**
+- **Curated Upload Verification Suite.** Extended test coverage with automated unit and integration tests across `tests/test_youtube_upload.c`, `tests/test_server_api.c`, `tests/test_web_assets.c`, and `tests/test_shortcut_generator.py`.
+- **E2E Integration Test Alignment.** Updated E2E integration test suite to explicitly toggle auto-upload during simulated test captures while verifying default disabled status on virgin boot.
 
 ---
 
