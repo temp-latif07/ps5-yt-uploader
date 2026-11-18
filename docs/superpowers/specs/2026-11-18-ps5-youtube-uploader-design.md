@@ -85,7 +85,7 @@ The user selected a phased MVP approach combining the best elements:
                                             (inotify / stat poll)
                                                       v
   +-----------------------------------------------------------------------------------------------+
-  | PS5 Background Daemon (pshared fork)                                                          |
+  | PS5 Background Daemon (Extracted lightweight pshared core, ~500KB)                            |
   |                                                                                               |
   |  +---------------------------+    +----------------------------+    +-----------------------+ |
   |  |   Capture Watcher Engine  |--->|    YouTube Upload Engine   |--->|   PS5 Notification    | |
@@ -112,18 +112,23 @@ The user selected a phased MVP approach combining the best elements:
 +-----------------------------+                                     +-----------------------------+
 ```
 
+### Builder Architectural Calls Made
+1. **Daemon-Only Extraction (Stripping PShare's Heavy GUI):**
+   - *Decision:* Rather than maintaining PShare's heavy SDL/FFmpeg native GUI in the Games tab, we extract *only* the core `pshared` filesystem watcher and networking daemon. All user interaction is consolidated into the lightweight WebKit companion (which serves both the PS5 fullscreen TV tile and phone/PC browsers).
+   - *Impact:* Drops binary size from ~35 MB to < 1 MB, eliminates complex graphics/decoder dependencies, and keeps console memory usage near zero.
+2. **Minimal Web Bootstrap Pulled into Phase 1:**
+   - *Decision:* A barebones HTTP server for OAuth configuration is included in Phase 1 (MVP) rather than waiting for Phase 3.
+   - *Impact:* Eliminates the need for users to edit JSON files manually over FTP. Users can immediately open `http://<ps5-ip>:8888` on their phone to paste their Google Client ID, view the Device Code / QR code, and click "Upload".
+3. **Daemon Lifecycle Management:**
+   - *Decision:* The daemon will run as a standard background ELF payload loaded via port 9021 (`elfldr`) or community boot autoloaders alongside `kstuff-lite`. The Phase 2 Media tile acts as a clean shortcut to the running service.
+
 ### Phase 1: MVP - PShare Fork & YouTube Engine
 1. **Google OAuth 2.0 Device Flow (RFC 8628):**
-   - Daemon requests device authorization from `https://oauth2.googleapis.com/device/code` with scope `https://www.googleapis.com/auth/youtube.upload`.
-   - Returns `verification_url` (`https://www.google.com/device`) and `user_code` (e.g., `ABCD-EFGH`).
-   - Console logs / notifies user to approve on phone or PC.
-   - Daemon polls `https://oauth2.googleapis.com/token` until granted, acquiring `access_token` and `refresh_token`.
-   - Tokens and client credentials stored encrypted/securely in `/data/pshare/youtube.json`.
+   - Minimal embedded web endpoint `/setup` displays a QR code and link to `https://www.google.com/device` along with the 8-character `user_code`.
+   - Daemon securely acquires and saves `access_token` and `refresh_token` in `/data/pshare/youtube.json`.
 2. **Resumable Upload Implementation:**
-   - POST to `https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status`.
-   - Payload specifies title (`[Game Name] - YYYY-MM-DD HH:MM`), description, privacy status (`unlisted` by default).
-   - Extracts upload session URI from `Location` header.
-   - Streams file in 8 MB chunks via HTTP `PUT` with `Content-Range`.
+   - Initiates resumable session with Google Video Upload API.
+   - Streams MP4 capture in 8 MB chunks via HTTP `PUT` with `Content-Range`.
    - Handles network interruptions with HTTP `308 Resume Incomplete` range queries.
 3. **System Notifications:**
    - On upload start: *"YouTube: Uploading clip..."*
@@ -132,11 +137,11 @@ The user selected a phased MVP approach combining the best elements:
 
 ### Phase 2: Dedicated Home Screen Media Tile
 1. **Media Tile Registration (`browser_patch`):**
-   - Utilize memory patching of the PS5 shellcore/app database to register a dedicated tile in the **Media** tab.
+   - Memory-patches PS5 shellcore / `app.db` to register a dedicated tile in the **Media** category.
    - Title: `YouTube Uploader` (or `PS5 Share`).
    - Icon: Stock-styled SVG/PNG asset.
 2. **Fullscreen WebKit Execution:**
-   - Launches `ps5-web-browser-fullscreen` directly to `http://127.0.0.1:<PORT>`.
+   - Launches `ps5-web-browser-fullscreen` directly to `http://127.0.0.1:8888`.
    - DualSense controller navigation: Left stick for mouse pointer, Cross (X) to select, Circle (O) to exit.
 
 ### Phase 3: Phone/PC Companion Web App
