@@ -7,7 +7,7 @@ LLD_PATH ?= $(shell which ld.lld 2>/dev/null || ls /opt/homebrew/bin/ld.lld /opt
 LLVM_STRIP ?= $(shell which llvm-strip 2>/dev/null || ls /opt/homebrew/bin/llvm-strip /opt/homebrew/opt/llvm*/bin/llvm-strip /usr/local/bin/llvm-strip 2>/dev/null | head -n 1 || which strip 2>/dev/null)
 MACOS_SDK ?= $(shell xcrun --show-sdk-path 2>/dev/null)
 
-PS5_CFLAGS ?= -target x86_64-unknown-freebsd12 -O2 -fPIC -DPS5 -I./include -I./src -I./vendor
+PS5_CFLAGS ?= -target x86_64-unknown-freebsd12 -O2 -fPIC -DPS5 -I./include -I./src -I./vendor -include include/ps5_shim.h
 ifneq ($(MACOS_SDK),)
 PS5_CFLAGS += -isystem $(MACOS_SDK)/usr/include
 endif

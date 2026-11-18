@@ -8,7 +8,27 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#ifndef PS5
 #include <sqlite3.h>
+#endif
+
+#if defined(PS5)
+int media_tile_register(const char* db_path, const char* app_title, const char* launch_url) {
+    (void)db_path; (void)app_title; (void)launch_url;
+    // On PS5, homescreen shortcuts are provisioned via WebKit AppCache package (itsPLK model)
+    return 0;
+}
+
+int media_tile_unregister(const char* db_path, const char* title_id) {
+    (void)db_path; (void)title_id;
+    return 0;
+}
+
+int media_tile_launch_browser(const char* launch_url) {
+    (void)launch_url;
+    return 0;
+}
+#else
 
 #define MAX_TABLES 64
 #define TABLE_NAME_MAX 128
@@ -379,3 +399,4 @@ int media_tile_launch_browser(const char* launch_url) {
     return 0;
 #endif
 }
+#endif /* !PS5 */
