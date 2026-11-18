@@ -4,6 +4,7 @@
 #include "api.h"
 #include "config.h"
 #include "watcher.h"
+#include "version.h"
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -205,7 +206,7 @@ static void test_get_api_status_initial(void) {
 
     cJSON* ver = cJSON_GetObjectItem(root, "version");
     assert(ver != NULL && cJSON_IsString(ver));
-    assert(strcmp(ver->valuestring, "1.0.0") == 0);
+    assert(strcmp(ver->valuestring, APP_VERSION) == 0);
 
     cJSON* app = cJSON_GetObjectItem(root, "app_name");
     assert(app != NULL && cJSON_IsString(app));

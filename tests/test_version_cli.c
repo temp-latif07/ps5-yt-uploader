@@ -33,7 +33,7 @@ static int run_command(const char* cmd, char* out_buf, size_t max_out) {
 
 static void test_version_constants(void) {
     printf("[Test 1] Verifying src/version.h constants...\n");
-    assert(strcmp(APP_VERSION, "1.0.0") == 0);
+    assert(strlen(APP_VERSION) > 0);
     assert(strcmp(APP_NAME, "ps5-yt-uploader") == 0);
     assert(strcmp(APP_DISPLAY_NAME, "PS5 YouTube Uploader") == 0);
     printf("  -> APP_VERSION: %s\n", APP_VERSION);
@@ -47,7 +47,9 @@ static void test_cli_long_version(void) {
     int exit_code = run_command("./bin/ps5-youtube-host --version 2>&1", output, sizeof(output));
     printf("  -> Exit code: %d, output: %s", exit_code, output);
     assert(exit_code == 0);
-    assert(strstr(output, "ps5-yt-uploader v1.0.0") != NULL);
+    char expected[256];
+    snprintf(expected, sizeof(expected), "%s v%s", APP_NAME, APP_VERSION);
+    assert(strstr(output, expected) != NULL);
 }
 
 static void test_cli_short_version(void) {
@@ -56,7 +58,9 @@ static void test_cli_short_version(void) {
     int exit_code = run_command("./bin/ps5-youtube-host -v 2>&1", output, sizeof(output));
     printf("  -> Exit code: %d, output: %s", exit_code, output);
     assert(exit_code == 0);
-    assert(strstr(output, "ps5-yt-uploader v1.0.0") != NULL);
+    char expected[256];
+    snprintf(expected, sizeof(expected), "%s v%s", APP_NAME, APP_VERSION);
+    assert(strstr(output, expected) != NULL);
 }
 
 int main(void) {

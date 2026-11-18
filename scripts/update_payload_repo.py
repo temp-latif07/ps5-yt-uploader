@@ -165,11 +165,13 @@ def update_payload_catalog(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "version.h"
         )
         version = extract_version_from_header(version_header)
-        if version and not version.startswith("v"):
-            version = f"v{version}"
 
     if not version:
         raise ValueError("Version string could not be determined. Please supply --version.")
+
+    version = version.strip()
+    if not version.startswith("v"):
+        version = f"v{version}"
 
     # Resolve filename & url
     if not filename:

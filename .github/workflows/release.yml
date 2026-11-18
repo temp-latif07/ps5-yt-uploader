@@ -30,6 +30,7 @@ jobs:
         run: |
           if [ -n "${{ inputs.tag }}" ]; then
             RELEASE_TAG="${{ inputs.tag }}"
+            RELEASE_TAG="v${RELEASE_TAG#v}"
           elif [ "${{ github.ref_type }}" = "tag" ]; then
             RELEASE_TAG="${{ github.ref_name }}"
           else

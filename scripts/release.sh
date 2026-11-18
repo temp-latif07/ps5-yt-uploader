@@ -105,9 +105,13 @@ echo "  -> Target release version: ${VERSION} (Tag: ${TAG})"
 
 # Step 3: Check if tag already exists
 if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-    echo "Error: Git tag ${TAG} already exists locally." >&2
-    echo "Please bump APP_VERSION in src/version.h before running release." >&2
-    exit 1
+    if [ "${DRY_RUN}" = true ]; then
+        echo "[DRY-RUN] Notice: Tag ${TAG} exists; would fail in live release unless bumped."
+    else
+        echo "Error: Git tag ${TAG} already exists locally." >&2
+        echo "Please bump APP_VERSION in src/version.h before running release." >&2
+        exit 1
+    fi
 fi
 
 # Step 4: Run test suite
