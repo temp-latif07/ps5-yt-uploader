@@ -8,7 +8,7 @@ SRC_DIR := src
 VENDOR_DIR := vendor
 TESTS_DIR := tests
 
-all: test_config test_crypto test_youtube test_watcher
+all: test_config test_crypto test_youtube test_watcher test_server
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
@@ -38,7 +38,13 @@ $(BIN_DIR)/test_watcher: $(TESTS_DIR)/test_watcher.c $(SRC_DIR)/watcher.c $(SRC_
 test_watcher: $(BIN_DIR) $(BIN_DIR)/test_watcher
 	./$(BIN_DIR)/test_watcher
 
+$(BIN_DIR)/test_server: $(TESTS_DIR)/test_server_api.c $(SRC_DIR)/server.c $(SRC_DIR)/api.c $(SRC_DIR)/watcher.c $(SRC_DIR)/notify.c $(SRC_DIR)/youtube.c $(SRC_DIR)/http_client.c $(SRC_DIR)/crypto.c $(SRC_DIR)/config.c $(VENDOR_DIR)/cJSON.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+test_server: $(BIN_DIR) $(BIN_DIR)/test_server
+	./$(BIN_DIR)/test_server
+
 clean:
 	rm -rf $(BIN_DIR)
 
-.PHONY: all test_config test_crypto test_youtube test_watcher clean
+.PHONY: all test_config test_crypto test_youtube test_watcher test_server clean
