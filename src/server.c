@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "server.h"
+#include "web_assets.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,6 +122,24 @@ void server_clear_routes(void) {
     }
     s_routes = NULL;
     pthread_mutex_unlock(&s_routes_mutex);
+}
+
+static void send_static_asset_response(int fd, const char* content_type, const unsigned char* data, unsigned int len) {
+    char header_buf[512];
+    int hlen = snprintf(header_buf, sizeof(header_buf),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: %s\r\n"
+        "Cache-Control: no-cache\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "Access-Control-Allow-Methods: GET, OPTIONS\r\n"
+        "Content-Length: %u\r\n"
+        "Connection: close\r\n"
+        "\r\n",
+        content_type, len);
+    send_all(fd, header_buf, (size_t)hlen);
+    if (len > 0 && data) {
+        send_all(fd, (const char*)data, (size_t)len);
+    }
 }
 
 static void send_cors_preflight_response(int fd) {
@@ -398,6 +417,16 @@ static void* connection_worker(void* arg) {
             free(resp_out);
         } else {
             send_bad_request_response(client_fd);
+        }
+    } else if (strcasecmp(method, "GET") == 0) {
+        if (strcmp(path, "/") == 0 || strcmp(path, "/index.html") == 0) {
+            send_static_asset_response(client_fd, "text/html; charset=utf-8", index_html, index_html_len);
+        } else if (strcmp(path, "/style.css") == 0) {
+            send_static_asset_response(client_fd, "text/css; charset=utf-8", style_css, style_css_len);
+        } else if (strcmp(path, "/app.js") == 0) {
+            send_static_asset_response(client_fd, "application/javascript; charset=utf-8", app_js, app_js_len);
+        } else {
+            send_not_found_response(client_fd);
         }
     } else {
         send_not_found_response(client_fd);

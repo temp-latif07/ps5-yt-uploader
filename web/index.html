@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PS5 YouTube Uploader</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="ps5-theme">
+  <!-- Top Navigation & Branding Header -->
+  <header class="ps5-header">
+    <div class="header-branding">
+      <div class="ps5-badge">PS5</div>
+      <div class="header-titles">
+        <h1 class="header-title">YouTube Uploader</h1>
+        <div class="header-subtitle">Direct Console Studio &bull; Background Watcher</div>
+      </div>
+    </div>
+    <div class="header-status-group">
+      <div id="auth-status-indicator" class="status-pill status-pill-disconnected">
+        <span class="status-dot"></span>
+        <span id="auth-status-text">Disconnected</span>
+      </div>
+      <div id="dualsense-indicator" class="status-pill status-pill-neutral">
+        <span class="ps-glyph">🎮</span>
+        <span id="dualsense-status-text">Controller Ready</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- TV & Mobile Navigation Tabs -->
+  <nav class="ps5-navbar" role="tablist" aria-label="Dashboard Navigation">
+    <button class="nav-tab active focusable" id="tab-btn-gallery" data-tab="gallery" role="tab" aria-selected="true" tabindex="0">
+      <span class="tab-icon">🎬</span>
+      <span class="tab-title">Clips Gallery</span>
+    </button>
+    <button class="nav-tab focusable" id="tab-btn-queue" data-tab="queue" role="tab" aria-selected="false" tabindex="0">
+      <span class="tab-icon">🚀</span>
+      <span class="tab-title">Upload Queue</span>
+      <span id="queue-badge-count" class="badge-count" style="display:none;">0</span>
+    </button>
+    <button class="nav-tab focusable" id="tab-btn-pairing" data-tab="pairing" role="tab" aria-selected="false" tabindex="0">
+      <span class="tab-icon">📱</span>
+      <span class="tab-title">Pairing &amp; Auth</span>
+    </button>
+    <button class="nav-tab focusable" id="tab-btn-settings" data-tab="settings" role="tab" aria-selected="false" tabindex="0">
+      <span class="tab-icon">⚙️</span>
+      <span class="tab-title">Settings</span>
+    </button>
+  </nav>
+
+  <!-- Main Views Container -->
+  <main class="ps5-container">
+    <!-- View 1: Clips Gallery -->
+    <section id="view-gallery" class="view-panel active" role="tabpanel" aria-labelledby="tab-btn-gallery">
+      <div class="panel-header">
+        <div class="panel-heading">
+          <h2>Recorded Game Captures</h2>
+          <p id="clips-counter" class="panel-subheading">Loading captures from console storage...</p>
+        </div>
+        <div class="panel-actions">
+          <button id="btn-refresh-clips" class="btn btn-secondary focusable" tabindex="0">
+            <span class="btn-icon">↻</span> Refresh Captures
+          </button>
+        </div>
+      </div>
+
+      <div id="clips-loading" class="loading-spinner-box" style="display:none;">
+        <div class="spinner"></div>
+        <p>Scanning console media storage...</p>
+      </div>
+
+      <div id="clips-grid" class="clips-grid">
+        <!-- Rendered clip cards will be populated here by app.js -->
+      </div>
+
+      <div id="clips-empty" class="empty-state" style="display:none;">
+        <div class="empty-state-icon">🎮</div>
+        <h3>No Recorded Clips Found</h3>
+        <p>Record gameplay clips using the PS5 Create button. Once saved to /user/media/captures/, they will appear here automatically.</p>
+        <button id="btn-empty-refresh" class="btn btn-primary focusable" tabindex="0">Refresh Media Library</button>
+      </div>
+    </section>
+
+    <!-- View 2: Upload Queue & Real-Time Status -->
+    <section id="view-queue" class="view-panel" role="tabpanel" aria-labelledby="tab-btn-queue" style="display:none;">
+      <div class="panel-header">
+        <div class="panel-heading">
+          <h2>Active Uploads &amp; Queue Status</h2>
+          <p class="panel-subheading">Real-time status of current and past video uploads</p>
+        </div>
+        <div class="panel-actions">
+          <button id="btn-refresh-queue" class="btn btn-secondary focusable" tabindex="0">
+            <span class="btn-icon">↻</span> Refresh Status
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Metrics Overview -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <span class="metric-title">Active Uploads</span>
+          <span id="metric-active-count" class="metric-value">0</span>
+          <span class="metric-desc">Concurrent workers active</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-title">Server Watcher</span>
+          <span id="metric-watcher-state" class="metric-value text-accent">Idle</span>
+          <span class="metric-desc">PS5 background daemon</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-title">Connected Channel</span>
+          <span id="metric-channel-name" class="metric-value">Not Authenticated</span>
+          <span id="metric-channel-id" class="metric-desc">-</span>
+        </div>
+      </div>
+
+      <div class="queue-section">
+        <h3>Upload Queue History</h3>
+        <div id="queue-list" class="queue-list">
+          <!-- Populated by app.js -->
+        </div>
+        <div id="queue-empty" class="empty-state">
+          <div class="empty-state-icon">📤</div>
+          <h3>Queue is Empty</h3>
+          <p>No video uploads currently in progress. Go to the Clips Gallery and click Upload on any clip to start.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- View 3: Pairing & Authentication -->
+    <section id="view-pairing" class="view-panel" role="tabpanel" aria-labelledby="tab-btn-pairing" style="display:none;">
+      <div class="panel-header">
+        <div class="panel-heading">
+          <h2>Pairing &amp; YouTube Authentication</h2>
+          <p class="panel-subheading">Link your YouTube channel to enable direct video uploads</p>
+        </div>
+      </div>
+
+      <div class="pairing-layout">
+        <!-- Left Column: Dynamic QR Code for Quick Mobile Connection -->
+        <div class="card pairing-card">
+          <div class="card-title-bar">
+            <h3>📱 Connect from Phone / PC</h3>
+          </div>
+          <div class="card-content qr-content-area">
+            <p class="qr-instructions">Scan this QR code with your phone camera to open this dashboard on your local Wi-Fi network:</p>
+            <div id="qr-code-wrapper" class="qr-code-box">
+              <div id="qr-code-canvas"></div>
+            </div>
+            <div class="url-copy-box">
+              <input type="text" id="console-url-input" class="input-text url-text" readonly value="http://localhost:8888/">
+              <button id="btn-copy-url" class="btn btn-secondary focusable" tabindex="0">📋 Copy</button>
+            </div>
+            <div class="qr-hint">Ensure your mobile device is connected to the same Wi-Fi network as your PS5.</div>
+          </div>
+        </div>
+
+        <!-- Right Column: Authentication Details & Import Form -->
+        <div class="card pairing-card">
+          <div class="card-title-bar">
+            <h3>🔑 Account Connection</h3>
+          </div>
+          <div class="card-content">
+            <div class="current-auth-card">
+              <div class="auth-row">
+                <span class="auth-label">Status:</span>
+                <span id="auth-info-status" class="auth-val text-warning">Not Authenticated</span>
+              </div>
+              <div class="auth-row">
+                <span class="auth-label">Channel Name:</span>
+                <span id="auth-info-channel" class="auth-val">-</span>
+              </div>
+              <div class="auth-row">
+                <span class="auth-label">Channel ID:</span>
+                <span id="auth-info-id" class="auth-val">-</span>
+              </div>
+            </div>
+
+            <!-- 1-Click Connect Button -->
+            <div class="one-click-wrapper">
+              <button id="btn-connect-session" class="btn btn-primary btn-large focusable" tabindex="0">
+                ✨ 1-Click Connect Current Session
+              </button>
+              <p class="field-subtext">Attempts to use existing authentication cookies or trigger local session linking.</p>
+            </div>
+
+            <div class="separator-line"><span>OR MANUAL IMPORT</span></div>
+
+            <!-- Manual Cookie Import Form -->
+            <form id="form-auth" onsubmit="return false;" class="auth-form">
+              <div class="form-group">
+                <label for="input-cookies">YouTube Session Cookies:</label>
+                <textarea id="input-cookies" class="input-text focusable" rows="3" placeholder="LOGIN_INFO=...; HSID=...; SSID=...; SID=...; SAPISID=..." tabindex="0"></textarea>
+                <span class="field-subtext">Export cookies from YouTube Studio using a browser extension (Cookie-Editor).</span>
+              </div>
+
+              <div class="form-group">
+                <label for="input-session-token">Session Token:</label>
+                <input type="text" id="input-session-token" class="input-text focusable" placeholder="YouTube Studio sessionToken or OAuth bearer token" tabindex="0">
+              </div>
+
+              <div class="form-row-2">
+                <div class="form-group">
+                  <label for="input-channel-name">Channel Name (Optional):</label>
+                  <input type="text" id="input-channel-name" class="input-text focusable" placeholder="e.g. PlayStation Studio" tabindex="0">
+                </div>
+                <div class="form-group">
+                  <label for="input-channel-id">Channel ID (Optional):</label>
+                  <input type="text" id="input-channel-id" class="input-text focusable" placeholder="UC..." tabindex="0">
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button id="btn-save-auth" class="btn btn-success focusable" tabindex="0">💾 Save &amp; Authenticate</button>
+                <button id="btn-disconnect-auth" class="btn btn-danger focusable" tabindex="0">Disconnect Account</button>
+              </div>
+              <div id="auth-message-box" class="alert-box" style="display:none;"></div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- View 4: Settings -->
+    <section id="view-settings" class="view-panel" role="tabpanel" aria-labelledby="tab-btn-settings" style="display:none;">
+      <div class="panel-header">
+        <div class="panel-heading">
+          <h2>Application Settings</h2>
+          <p class="panel-subheading">Configure daemon background watcher behavior and upload presets</p>
+        </div>
+      </div>
+
+      <div class="card settings-card">
+        <form id="form-config" onsubmit="return false;" class="settings-form">
+          <div class="setting-row">
+            <div class="setting-labels">
+              <label for="chk-auto-upload" class="setting-title">Auto-Upload Captured Clips</label>
+              <div class="setting-explanation">When enabled, any new gameplay clip recorded via the DualSense Create button is automatically queued and uploaded in the background.</div>
+            </div>
+            <div class="setting-toggle">
+              <label class="switch">
+                <input type="checkbox" id="chk-auto-upload" class="focusable" tabindex="0">
+                <span class="slider round"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-labels">
+              <label for="sel-default-privacy" class="setting-title">Default Upload Privacy</label>
+              <div class="setting-explanation">Choose the default YouTube video visibility for both automatic background uploads and manual uploads.</div>
+            </div>
+            <div class="setting-toggle">
+              <select id="sel-default-privacy" class="input-select focusable" tabindex="0">
+                <option value="UNLISTED">Unlisted (Anyone with link can view)</option>
+                <option value="PUBLIC">Public (Available in search &amp; feeds)</option>
+                <option value="PRIVATE">Private (Only you can view)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button id="btn-save-settings" class="btn btn-primary focusable" tabindex="0">Save Settings</button>
+          </div>
+          <div id="settings-message-box" class="alert-box" style="display:none;"></div>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <!-- Upload Modal Dialog -->
+  <div id="upload-modal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modal-title">Upload Gameplay Clip to YouTube</h3>
+        <button id="btn-modal-close" class="modal-close-icon focusable" aria-label="Close dialog" tabindex="0">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="clip-highlight-card">
+          <div id="modal-clip-badge" class="game-badge">PPSA01234</div>
+          <div class="clip-highlight-meta">
+            <div id="modal-clip-filename" class="clip-highlight-name">capture.mp4</div>
+            <div id="modal-clip-details" class="clip-highlight-info">Size: 120 MB &bull; Date: Nov 18, 2026</div>
+          </div>
+        </div>
+
+        <input type="hidden" id="modal-clip-filepath">
+
+        <div class="form-group">
+          <label for="modal-input-title">Video Title:</label>
+          <input type="text" id="modal-input-title" class="input-text focusable" maxlength="100" placeholder="Enter YouTube video title" tabindex="0">
+        </div>
+
+        <div class="form-group">
+          <label for="modal-input-description">Video Description:</label>
+          <textarea id="modal-input-description" class="input-text focusable" rows="4" placeholder="Enter video description" tabindex="0"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="modal-select-privacy">Privacy Setting:</label>
+          <select id="modal-select-privacy" class="input-select focusable" tabindex="0">
+            <option value="UNLISTED">Unlisted (Recommended)</option>
+            <option value="PUBLIC">Public</option>
+            <option value="PRIVATE">Private</option>
+          </select>
+        </div>
+
+        <div id="modal-alert-box" class="alert-box alert-error" style="display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-modal-cancel" class="btn btn-secondary focusable" tabindex="0">Cancel</button>
+        <button id="btn-modal-submit" class="btn btn-primary btn-upload-now focusable" tabindex="0">
+          <span class="btn-icon">▲</span> Upload to YouTube
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DualSense Couch Navigation Guide Footer -->
+  <footer class="ps5-footer">
+    <div class="couch-nav-guide">
+      <span class="guide-item"><span class="ps-btn ps-dpad">▲▼◀▶</span> Navigate</span>
+      <span class="guide-item"><span class="ps-btn ps-cross">✖</span> Select</span>
+      <span class="guide-item"><span class="ps-btn ps-circle">●</span> Back / Close</span>
+      <span class="guide-item"><span class="ps-btn ps-triangle">▲</span> Refresh</span>
+    </div>
+    <div class="footer-copy">
+      <span>PlayStation 5 Direct YouTube Uploader &bull; Fully Offline LAN Embedded Studio</span>
+    </div>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
