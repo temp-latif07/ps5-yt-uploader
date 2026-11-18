@@ -6,6 +6,14 @@ What's new in ps5-yt-uploader, written for humans.
 
 ## Unreleased
 
+Planned improvements and upcoming fixes for subsequent releases.
+
+---
+
+## 1.0.3
+
+Manual clip curation studio, authentic PS5 libkernel toast notifications, clean FreeBSD 12 ELF symbol isolation, and itsPLK homescreen shortcut integration.
+
 **New**
 - **Manual Clip Selection & Metadata Curation Studio.** Automatic background uploading is now disabled by default, giving users complete manual control. Select any recorded clip from your console and customize its Title, Description, Privacy (*Public*, *Unlisted*, or *Private*), Audience (*Made for Kids* COPPA compliance), and optional YouTube Playlist ID before initiating upload.
 - **Homescreen Shortcut Generator (`itsPLK` Model).** Added `scripts/generate_shortcut.py` and `make shortcut` to produce an offline WebKit AppCache homescreen application package (`sce_sys/param.json` + `icon0.png`) targeting Title ID `PS5YT0001`, enabling a native home screen tile that boots directly into the local Web Companion Studio.
