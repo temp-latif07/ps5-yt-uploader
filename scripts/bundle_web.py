@@ -6,7 +6,37 @@ as embedded C byte arrays.
 """
 
 import os
+import re
 import sys
+
+def clean_asset_content(filename: str, raw_data: bytes) -> bytes:
+    """Performs clean whitespace and comment stripping on web assets."""
+    text = raw_data.decode("utf-8")
+    if filename.endswith(".html"):
+        # Strip HTML comments
+        text = re.sub(r'<!--(?!\s*(?:\[if [^\]]+]|<!|>))(?:(?!-->).)*-->', '', text, flags=re.DOTALL)
+    elif filename.endswith(".css"):
+        # Strip CSS block comments
+        text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+    elif filename.endswith(".js"):
+        # Strip single-line standalone comments
+        text = re.sub(r'^\s*//.*$', '', text, flags=re.MULTILINE)
+
+    # Strip trailing whitespace per line and collapse consecutive empty lines
+    lines = [line.rstrip() for line in text.splitlines()]
+    cleaned = []
+    prev_blank = False
+    for line in lines:
+        if not line:
+            if not prev_blank:
+                cleaned.append(line)
+            prev_blank = True
+        else:
+            cleaned.append(line)
+            prev_blank = False
+
+    cleaned_text = "\n".join(cleaned).strip() + "\n"
+    return cleaned_text.encode("utf-8")
 
 def format_c_byte_array(var_name: str, data: bytes) -> str:
     lines = []
@@ -58,9 +88,10 @@ def bundle(repo_root: str) -> None:
     total_bytes = 0
     for var_name, path in assets:
         with open(path, "rb") as f:
-            content = f.read()
+            raw_content = f.read()
+        content = clean_asset_content(os.path.basename(path), raw_content)
         total_bytes += len(content)
-        print(f"Bundling {os.path.basename(path)}: {len(content):,} bytes -> {var_name}")
+        print(f"Bundling {os.path.basename(path)}: {len(raw_content):,} -> {len(content):,} bytes -> {var_name}")
         header_lines.append(format_c_byte_array(var_name, content))
 
     header_lines.extend([

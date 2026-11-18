@@ -430,6 +430,16 @@
     });
   }
 
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function getBaseFilename(path) {
     if (!path) return '';
     const parts = path.split('/');
@@ -592,18 +602,23 @@
       const sizeStr = formatBytes(clip.size_bytes);
       const dateStr = formatTimestamp(clip.timestamp);
 
+      const safeFilename = escapeHtml(filename);
+      const safeTitleId = escapeHtml(titleId);
+      const safeSizeStr = escapeHtml(sizeStr);
+      const safeDateStr = escapeHtml(dateStr);
+
       card.innerHTML =
         '<div class="clip-thumbnail-area">' +
           '<div class="clip-game-icon">🎮</div>' +
-          '<span class="clip-badge">' + titleId + '</span>' +
+          '<span class="clip-badge">' + safeTitleId + '</span>' +
           '<span class="clip-duration-tag">MP4</span>' +
         '</div>' +
         '<div class="clip-card-body">' +
-          '<div class="clip-title-id" title="' + filename + '">' + filename + '</div>' +
+          '<div class="clip-title-id" title="' + safeFilename + '">' + safeFilename + '</div>' +
           '<div class="clip-metadata-list">' +
-            '<div class="clip-meta-row"><span>Game:</span><span class="clip-meta-val">' + titleId + '</span></div>' +
-            '<div class="clip-meta-row"><span>Recorded:</span><span class="clip-meta-val">' + dateStr + '</span></div>' +
-            '<div class="clip-meta-row"><span>File Size:</span><span class="clip-meta-val">' + sizeStr + '</span></div>' +
+            '<div class="clip-meta-row"><span>Game:</span><span class="clip-meta-val">' + safeTitleId + '</span></div>' +
+            '<div class="clip-meta-row"><span>Recorded:</span><span class="clip-meta-val">' + safeDateStr + '</span></div>' +
+            '<div class="clip-meta-row"><span>File Size:</span><span class="clip-meta-val">' + safeSizeStr + '</span></div>' +
           '</div>' +
           '<div class="clip-card-actions">' +
             '<button class="btn btn-primary btn-upload focusable" data-clip-index="' + idx + '" tabindex="0">' +
@@ -667,26 +682,31 @@
       let statusLabel = item.status.toUpperCase();
       let linkHtml = '';
 
+      const safeTitle = escapeHtml(item.title || item.filename);
+      const safeFilename = escapeHtml(item.filename);
+
       if (item.status === 'completed' && item.videoId) {
-        linkHtml = '<a class="youtube-link" href="https://youtu.be/' + item.videoId + '" target="_blank" rel="noopener">▶ View on YouTube (youtu.be/' + item.videoId + ')</a>';
+        const safeVid = escapeHtml(item.videoId);
+        linkHtml = '<a class="youtube-link" href="https://youtu.be/' + safeVid + '" target="_blank" rel="noopener">▶ View on YouTube (youtu.be/' + safeVid + ')</a>';
       } else if (item.status === 'queued') {
         linkHtml = '<span>Waiting for worker slot...</span>';
       } else if (item.status === 'uploading') {
-        linkHtml = '<span>Uploading to YouTube API...</span>';
+        statusLabel = 'Uploading in background on console...';
+        linkHtml = '<span class="text-accent">Upload is streaming directly from PS5 SSD. Check on-screen notifications for completion.</span>';
       } else if (item.status === 'failed') {
-        linkHtml = '<span class="text-danger">Upload failed: ' + (item.error || 'Server error') + '</span>';
+        linkHtml = '<span class="text-danger">Upload failed: ' + escapeHtml(item.error || 'Server error') + '</span>';
       }
 
       itemEl.innerHTML =
         '<div class="queue-item-header">' +
-          '<div class="queue-item-title">' + (item.title || item.filename) + '</div>' +
+          '<div class="queue-item-title">' + safeTitle + '</div>' +
           '<div class="queue-item-status ' + statusClass + '">' + statusLabel + '</div>' +
         '</div>' +
         '<div class="progress-bar-container">' +
           '<div class="progress-bar-fill ' + (item.status === 'uploading' ? 'indeterminate' : '') + '" style="width:' + item.progress + '%;"></div>' +
         '</div>' +
         '<div class="queue-item-meta">' +
-          '<span>File: ' + item.filename + '</span>' +
+          '<span>File: ' + safeFilename + '</span>' +
           linkHtml +
         '</div>';
 
@@ -775,15 +795,15 @@
       const res = await submitUpload(filepath, title, description, privacy);
       closeUploadModal();
 
-      // Track queued task locally
+      // Track queued task locally in background uploading state
       const task = {
         id: Date.now().toString(),
         filepath: filepath,
         filename: getBaseFilename(filepath),
         title: title,
         privacy: privacy,
-        status: 'queued',
-        progress: 10,
+        status: 'uploading',
+        progress: 100,
         videoId: null
       };
       state.uploadQueue.unshift(task);
@@ -791,20 +811,6 @@
       // Switch to queue view to show user the upload in progress
       switchTab('queue');
       renderQueueList();
-
-      // Simulate progress advancement while server processes
-      setTimeout(function () {
-        task.status = 'uploading';
-        task.progress = 60;
-        renderQueueList();
-      }, 1000);
-
-      setTimeout(function () {
-        task.status = 'completed';
-        task.progress = 100;
-        task.videoId = 'ps5_' + Math.floor(100000 + Math.random() * 900000);
-        renderQueueList();
-      }, 4000);
 
     } catch (err) {
       if (alertBox) {
@@ -820,15 +826,24 @@
   }
 
   // --- Dynamic QR Code Setup ---
-  function setupQRCode() {
+  function setupQRCode(customUrl) {
     const qrCanvas = document.getElementById('qr-code-canvas');
     const urlInput = document.getElementById('console-url-input');
     if (!qrCanvas) return;
 
-    const host = window.location.host || 'localhost:8888';
-    const fullUrl = 'http://' + host + '/';
+    let fullUrl = customUrl;
+    if (!fullUrl) {
+      if (urlInput && urlInput.value && urlInput.value.trim() !== '') {
+        fullUrl = urlInput.value.trim();
+      } else {
+        const host = window.location.host || 'localhost:8888';
+        fullUrl = 'http://' + host + '/';
+      }
+    }
 
-    if (urlInput) urlInput.value = fullUrl;
+    if (urlInput && !customUrl) {
+      urlInput.value = fullUrl;
+    }
 
     try {
       const svgMarkup = renderQRCodeSVG(fullUrl, 200);
@@ -954,17 +969,21 @@
           loadClips();
           lastButtonPress = now;
         }
-        // D-Pad navigation (buttons 12=Up, 13=Down, 14=Left, 15=Right)
-        else if (pad.buttons[12] && pad.buttons[12].pressed) {
+        // Left analog stick axes support
+        const axisX = (pad.axes && pad.axes.length > 0) ? pad.axes[0] : 0;
+        const axisY = (pad.axes && pad.axes.length > 1) ? pad.axes[1] : 0;
+
+        // D-Pad and Left Analog Stick navigation (buttons 12=Up, 13=Down, 14=Left, 15=Right)
+        if ((pad.buttons[12] && pad.buttons[12].pressed) || axisY < -0.5) {
           moveFocus(-1);
           lastButtonPress = now;
-        } else if (pad.buttons[13] && pad.buttons[13].pressed) {
+        } else if ((pad.buttons[13] && pad.buttons[13].pressed) || axisY > 0.5) {
           moveFocus(1);
           lastButtonPress = now;
-        } else if (pad.buttons[14] && pad.buttons[14].pressed) {
+        } else if ((pad.buttons[14] && pad.buttons[14].pressed) || axisX < -0.5) {
           moveFocus(-1);
           lastButtonPress = now;
-        } else if (pad.buttons[15] && pad.buttons[15].pressed) {
+        } else if ((pad.buttons[15] && pad.buttons[15].pressed) || axisX > 0.5) {
           moveFocus(1);
           lastButtonPress = now;
         }
@@ -997,6 +1016,22 @@
       loadStatus();
       renderQueueList();
     });
+
+    // Dynamic QR code update when user types LAN IP
+    const urlInput = document.getElementById('console-url-input');
+    if (urlInput) {
+      const onUrlChanged = function () {
+        let val = urlInput.value.trim();
+        if (val) {
+          if (!val.startsWith('http://') && !val.startsWith('https://')) {
+            val = 'http://' + val;
+          }
+          setupQRCode(val);
+        }
+      };
+      urlInput.addEventListener('input', onUrlChanged);
+      urlInput.addEventListener('change', onUrlChanged);
+    }
 
     // Copy URL button
     const btnCopyUrl = document.getElementById('btn-copy-url');
