@@ -1,6 +1,6 @@
 CC ?= clang
 CFLAGS ?= -Wall -Wextra -std=c99 -Iinclude -Isrc -Ivendor -pthread -g
-LDFLAGS ?= -pthread -lcurl
+LDFLAGS ?= -pthread -lcurl -lsqlite3
 
 
 BIN_DIR := bin
@@ -8,7 +8,7 @@ SRC_DIR := src
 VENDOR_DIR := vendor
 TESTS_DIR := tests
 
-all: test_config test_crypto test_youtube test_watcher test_server test_web
+all: test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
@@ -55,7 +55,13 @@ $(BIN_DIR)/test_web: $(TESTS_DIR)/test_web_assets.c $(SRC_DIR)/server.c $(SRC_DI
 test_web: $(BIN_DIR) $(SRC_DIR)/web_assets.h $(BIN_DIR)/test_web
 	./$(BIN_DIR)/test_web
 
+$(BIN_DIR)/test_media_tile: $(TESTS_DIR)/test_media_tile.c $(SRC_DIR)/media_tile.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+test_media_tile: $(BIN_DIR) $(BIN_DIR)/test_media_tile
+	./$(BIN_DIR)/test_media_tile
+
 clean:
 	rm -rf $(BIN_DIR)
 
-.PHONY: all test_config test_crypto test_youtube test_watcher test_server test_web web_assets clean
+.PHONY: all test_config test_crypto test_youtube test_watcher test_server test_web test_media_tile web_assets clean
