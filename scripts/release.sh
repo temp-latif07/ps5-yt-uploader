@@ -208,6 +208,7 @@ if command -v gh &>/dev/null && gh auth token &>/dev/null; then
         "${ELF_PATH}" \
         "${ELF_PATH}.sha256" \
         "bin/ps5-youtube.elf" \
+        "bin/payload.elf" \
         --title "${TAG} - PS5 YouTube Uploader" \
         --notes "${RELEASE_NOTES}" || {
             echo "Notice: gh release create returned non-zero (release may already exist)."

@@ -6,6 +6,14 @@ What's new in ps5-yt-uploader, written for humans.
 
 ## Unreleased
 
+Planned improvements and upcoming fixes for subsequent releases.
+
+---
+
+## 1.0.6
+
+Network subsystem initialization, browser launch sequencing, on-screen notification targets, and active process naming for PlayStation 5.
+
 **Fixes**
 - **PS5 Network Subsystem Initialization (`sceNetInit`):** Initialized `libSceNet` prior to creating HTTP server listening sockets, preventing immediate process exit on PS5 hardware.
 - **Browser Launch Sequencing:** Deferred WebKit browser dispatch until after the local HTTP server and REST API routes are fully bound and listening, resolving "Cannot connect to server" errors on launch.
