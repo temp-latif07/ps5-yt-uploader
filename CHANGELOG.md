@@ -10,6 +10,17 @@ Planned improvements and upcoming fixes for subsequent releases.
 
 ---
 
+## 1.0.7
+
+Removal of invalid kernel symbols to prevent startup crash, restoration of canonical 3120-byte notification request layout, and immediate visual startup confirmation toast.
+
+**Fixes**
+- **Startup Crash Prevention (Removed Invalid Kernel Symbol):** Removed speculative `sceKernelSetProcessName` and `pthread_set_name_np` calls at process entry. In production PS5 firmware (7.00–12.20), `sceKernelSetProcessName` does not exist in `libkernel.sprx` and resolved to `0x0`, causing an immediate segmentation fault before startup code or notifications could run.
+- **Canonical Notification Struct (`3120` bytes):** Reverted the notification request structure to John Törnblom's canonical layout (`unused[45]`, `message[3075]`, zero-initialized) tested across all PS5 firmware versions. Custom icon URI and user ID overrides that caused notification rejections have been eliminated.
+- **Immediate Startup Notification:** Dispatched `ps5-yt-uploader started!` at the very beginning of execution so users receive instant visual confirmation on screen the moment the payload executes.
+
+---
+
 ## 1.0.6
 
 Network subsystem initialization, browser launch sequencing, on-screen notification targets, and active process naming for PlayStation 5.

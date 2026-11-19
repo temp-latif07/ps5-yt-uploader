@@ -1,5 +1,5 @@
 /**
- * PlayStation 5 YouTube Uploader (ps5-yt-uploader v1.0.2)
+ * PlayStation 5 YouTube Uploader (ps5-yt-uploader v1.0.7)
  * Embedded Dashboard Application
  * 100% Self-Contained Vanilla JS (Zero External Dependencies)
  */
@@ -8,7 +8,7 @@
   'use strict';
 
   const APP_NAME = 'ps5-yt-uploader';
-  const APP_VERSION = '1.0.2';
+  const APP_VERSION = '1.0.7';
 
   // --- Embedded QR Code Generator (ISO/IEC 18004 Minimal Implementation) ---
   const QRMath = {

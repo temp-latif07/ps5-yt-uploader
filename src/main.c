@@ -19,10 +19,7 @@
 #include <errno.h>
 
 #ifdef PS5
-#include <pthread.h>
 int sceNetInit(void);
-int sceKernelSetProcessName(const char* name);
-void pthread_set_name_np(pthread_t thread, const char* name);
 #endif
 
 #define DEFAULT_PORT 8888
@@ -103,17 +100,13 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-#ifdef PS5
-    // Ensure the process and main thread identify as ps5-yt-uploader in kernel process tables
-    pthread_set_name_np(pthread_self(), "ps5-yt-uploader");
-    sceKernelSetProcessName("ps5-yt-uploader");
+    // Immediate startup notification for visual confirmation on PS5
+    notify_send("ps5-yt-uploader started!");
 
+#ifdef PS5
     // Initialize PS5 network subsystem before creating any sockets
     sceNetInit();
 #endif
-
-    // Immediate startup notification for visual confirmation on PS5
-    notify_send("YouTube Uploader starting...");
 
     // 1. config_init(data_dir): Ensure directory exists with 0777 and load config.json
     if (config_init(data_dir) != 0) {
@@ -182,9 +175,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 7. notify_send("YouTube Uploader running on port <port>")
+    // 7. notify_send("ps5-yt-uploader running on port <port>")
     char notify_msg[128];
-    snprintf(notify_msg, sizeof(notify_msg), "YouTube Uploader running on port %d", port);
+    snprintf(notify_msg, sizeof(notify_msg), "ps5-yt-uploader running on port %d", port);
     notify_send(notify_msg);
 
     // 8. Launch browser only now that the HTTP server is running and ready to handle requests
