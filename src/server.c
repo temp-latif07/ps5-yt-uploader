@@ -27,6 +27,10 @@
 #define MSG_NOSIGNAL 0
 #endif
 
+#ifdef PS5
+int sceNetInit(void);
+#endif
+
 typedef struct route_node {
     char method[16];
     char path[256];
@@ -538,6 +542,10 @@ int server_start(int port) {
     }
 
     signal(SIGPIPE, SIG_IGN);
+
+#ifdef PS5
+    sceNetInit();
+#endif
 
     pthread_mutex_lock(&s_server_mutex);
     if (s_server_running) {

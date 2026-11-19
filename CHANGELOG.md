@@ -6,7 +6,14 @@ What's new in ps5-yt-uploader, written for humans.
 
 ## Unreleased
 
-Planned improvements and upcoming fixes for subsequent releases.
+**Fixes**
+- **PS5 Network Subsystem Initialization (`sceNetInit`):** Initialized `libSceNet` prior to creating HTTP server listening sockets, preventing immediate process exit on PS5 hardware.
+- **Browser Launch Sequencing:** Deferred WebKit browser dispatch until after the local HTTP server and REST API routes are fully bound and listening, resolving "Cannot connect to server" errors on launch.
+- **PS5 Notification Struct & Active User Target:** Corrected notification request structure to target active logged-in users (`target_id = -1`) and specify the system icon URI (`cxml://psnotification/tex_icon_system`), ensuring on-screen TV toasts display reliably.
+- **Process & Thread Identification (`ps5-yt-uploader`):** Invoked `pthread_set_name_np()` and `sceKernelSetProcessName()` at startup so process inspection tools can identify the process as `ps5-yt-uploader` rather than generic `payload.elf`.
+
+**Behind the scenes**
+- **`payload.elf` Build Alias:** Added `bin/payload.elf` build symlink in `Makefile` for seamless compatibility with payload uploaders and autoloader scripts expecting default naming.
 
 ---
 

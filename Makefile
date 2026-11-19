@@ -69,6 +69,7 @@ ps5: $(BIN_DIR) $(SRC_DIR)/web_assets.h $(SRC_DIR)/shortcut_assets.h $(PS5_OBJS)
 		-o $(BIN_DIR)/ps5-yt-uploader.elf
 	@if [ -n "$(LLVM_STRIP)" ]; then $(LLVM_STRIP) $(BIN_DIR)/ps5-yt-uploader.elf 2>/dev/null || true; fi
 	@ln -sf ps5-yt-uploader.elf $(BIN_DIR)/ps5-youtube.elf
+	@ln -sf ps5-yt-uploader.elf $(BIN_DIR)/payload.elf
 	@echo "Built $(BIN_DIR)/ps5-yt-uploader.elf size: $$(ls -lh $(BIN_DIR)/ps5-yt-uploader.elf | awk '{print $$5}')"
 
 $(BIN_DIR)/test_version: $(TESTS_DIR)/test_version_cli.c $(SRC_DIR)/version.h

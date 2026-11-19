@@ -18,6 +18,13 @@
 #include <unistd.h>
 #include <errno.h>
 
+#ifdef PS5
+#include <pthread.h>
+int sceNetInit(void);
+int sceKernelSetProcessName(const char* name);
+void pthread_set_name_np(pthread_t thread, const char* name);
+#endif
+
 #define DEFAULT_PORT 8888
 #define DEFAULT_DATA_DIR "/data/youtube_uploader"
 #define DEFAULT_CAPTURES_DIR "/user/av_content/video"
@@ -96,6 +103,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+#ifdef PS5
+    // Ensure the process and main thread identify as ps5-yt-uploader in kernel process tables
+    pthread_set_name_np(pthread_self(), "ps5-yt-uploader");
+    sceKernelSetProcessName("ps5-yt-uploader");
+
+    // Initialize PS5 network subsystem before creating any sockets
+    sceNetInit();
+#endif
+
     // Immediate startup notification for visual confirmation on PS5
     notify_send("YouTube Uploader starting...");
 
@@ -127,7 +143,6 @@ int main(int argc, char* argv[]) {
         if (tile_rc != 0) {
             fprintf(stderr, "Warning: Failed to register media tile in MMS database '%s'\n", app_db ? app_db : "default");
         }
-        media_tile_launch_browser(launch_url);
     }
 
     // 3. Signal handling (SIGINT, SIGTERM, SIGPIPE)
@@ -171,6 +186,13 @@ int main(int argc, char* argv[]) {
     char notify_msg[128];
     snprintf(notify_msg, sizeof(notify_msg), "YouTube Uploader running on port %d", port);
     notify_send(notify_msg);
+
+    // 8. Launch browser only now that the HTTP server is running and ready to handle requests
+    if (!no_tile) {
+        char launch_url[128];
+        snprintf(launch_url, sizeof(launch_url), "http://127.0.0.1:%d", port);
+        media_tile_launch_browser(launch_url);
+    }
 
     while (g_running) {
         sleep(1);
