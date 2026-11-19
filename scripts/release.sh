@@ -206,9 +206,6 @@ echo "==> Step 9: Creating GitHub Release via gh CLI..."
 if command -v gh &>/dev/null && gh auth token &>/dev/null; then
     gh release create "${TAG}" \
         "${ELF_PATH}" \
-        "${ELF_PATH}.sha256" \
-        "bin/ps5-youtube.elf" \
-        "bin/payload.elf" \
         --title "${TAG} - PS5 YouTube Uploader" \
         --notes "${RELEASE_NOTES}" || {
             echo "Notice: gh release create returned non-zero (release may already exist)."
