@@ -8,9 +8,9 @@ This document defines the development, maintenance, and release standards for **
 
 - **Project Name:** `ps5-yt-uploader`
 - **Primary Artifacts:**
-  - `build/ps5-yt-uploader.elf` — Background `elfldr` payload (port `8888`, static `libcurl` + TLS + embedded CA bundle).
-  - `build/PPSA97631/` — Native home-screen launcher tile (`YouTube Uploader`, Title ID `PPSA97631`, Content ID `UP9000-PPSA97631_00-PS5YTUPLOADER001`) that boots `ps5-yt-uploader.elf` via `127.0.0.1:9021`, opens the PS5 browser on `http://127.0.0.1:8888`, and exits cleanly so uploads continue while playing games.
-- **Coexistence:** Uses port `8888` and Title ID `PPSA97631` (never collides with `torbox-ps5` on `8080` / `PPSA97630`).
+  - `build/ps5-yt-uploader.elf` — Background `elfldr` payload (port `8085`, static `libcurl` + TLS + embedded CA bundle).
+  - `build/PPSA97631/` — Native home-screen launcher tile (`YouTube Uploader`, Title ID `PPSA97631`, Content ID `UP9000-PPSA97631_00-PS5YTUPLOADER001`) that boots `ps5-yt-uploader.elf` via `127.0.0.1:9021`, opens the PS5 browser on `http://127.0.0.1:8085`, and exits cleanly so uploads continue while playing games.
+- **Coexistence:** Uses port `8085` and Title ID `PPSA97631` (never collides with `torbox-ps5` on `8080` / `PPSA97630` or PS5 Web File Manager on `8888`).
 - **Clean-Room Guarantee:** 100% open-source C99/C11 and standard POSIX interfaces. Zero proprietary Sony SDK libraries, leaked decryption keys, or DRM circumvention code.
 - **Resource Limits:** Static TLS ELF payload stays lean (~1.5–4 MB on disk), runtime RAM footprint under 16 MB, and < 0.1% CPU at idle.
 - **Original Reference:** The earlier codebase is preserved under `archive/` for reference only; do not modify `archive/` unless explicitly requested.

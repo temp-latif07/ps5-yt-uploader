@@ -7,7 +7,7 @@
 #define APP_VERSION "2.0.0"
 #define APP_NAME "ps5-yt-uploader"
 #define APP_TITLE_ID "PPSA97631"
-#define APP_PORT 8888
+#define APP_PORT 8085
 #define THREAD_STACK (1024 * 1024) // below 2 MiB: titles/payloads share the flexible pool
 
 typedef struct {

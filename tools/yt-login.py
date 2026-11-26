@@ -7,8 +7,8 @@ and active ytcfg metadata via Chrome DevTools Protocol, POSTs them to the consol
 and deletes the temporary browser profile so daily browsing never rotates those cookies.
 
 Usage:
-    python3 tools/yt-login.py http://<ps5-ip>:8888
-    python3 tools/yt-login.py http://<ps5-ip>:8888 --choose-channel
+    python3 tools/yt-login.py http://<ps5-ip>:8085
+    python3 tools/yt-login.py http://<ps5-ip>:8085 --choose-channel
     python3 tools/yt-login.py --self-test
 """
 
@@ -382,7 +382,7 @@ def self_test() -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="One-time isolated browser login helper for PS5 YouTube Uploader.")
-    ap.add_argument("ps5_url", nargs="?", help="Console web UI URL, e.g. http://192.168.1.50:8888")
+    ap.add_argument("ps5_url", nargs="?", help="Console web UI URL, e.g. http://192.168.1.50:8085")
     ap.add_argument("--choose-channel", action="store_true", help="Pause so you can switch to a Brand Account before capturing")
     ap.add_argument("--browser", default="", help="Path to Chrome/Chromium/Edge/Brave binary")
     ap.add_argument("--timeout", type=int, default=300, help="Login timeout in seconds (default: 300)")
@@ -392,7 +392,7 @@ def main() -> int:
     if args.self_test:
         return self_test()
     if not args.ps5_url:
-        ap.error("ps5_url is required (e.g. python3 tools/yt-login.py http://192.168.1.50:8888)")
+        ap.error("ps5_url is required (e.g. python3 tools/yt-login.py http://192.168.1.50:8085)")
 
     browser = find_browser(args.browser)
     print("Opening an isolated browser window to https://studio.youtube.com/ ...")

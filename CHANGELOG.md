@@ -15,7 +15,7 @@ Planned improvements and upcoming fixes.
 Ground-up rebuild modeled on the `torbox-ps5` architecture for rock-solid reliability on the PS5 home screen, in the PS5 browser, and on phones/PCs.
 
 **New**
-- **Dedicated Home-Screen Launcher Tile (`PPSA97631`):** Installs under `/data/homebrew/PPSA97631/` via ShadowMountPlus. Opening it starts the background payload via `elfldr` (port `9021`), opens the PS5 browser on `http://127.0.0.1:8888`, and exits cleanly so uploads continue while you play games.
+- **Dedicated Home-Screen Launcher Tile (`PPSA97631`):** Installs under `/data/homebrew/PPSA97631/` via ShadowMountPlus. Opening it starts the background payload via `elfldr` (port `9021`), opens the PS5 browser on `http://127.0.0.1:8085`, and exits cleanly so uploads continue while you play games.
 - **One-Time Isolated Login Helper (`tools/yt-login.py`):** Opens a temporary isolated browser window to YouTube Studio, saves your cookies and selected channel metadata to the PS5 (`--choose-channel` supported for Brand Accounts), and deletes the temporary profile so daily browsing does not rotate or break your session.
 - **Built-in Phone QR Code:** Scannable QR code in the TV UI (on the login screen and anytime from the header) to open the dashboard on your phone for easy cookie upload, metadata typing, previewing, and queue management.
 - **In-Browser Clip Preview:** Stream saved `.mp4` and `.webm` gameplay captures with full HTTP `Range` seeking right inside the web UI before uploading.

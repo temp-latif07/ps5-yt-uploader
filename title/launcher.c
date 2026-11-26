@@ -22,7 +22,7 @@ int sceSystemServiceLoadExec(const char *path, char *const argv[]);
 int sceSystemServiceLaunchWebBrowser(const char *uri, void *param);
 int sceUserServiceInitialize(void *param);
 
-#define SERVER_PORT 8888
+#define SERVER_PORT 8085
 #define ELFLDR_PORT 9021
 #define PAYLOAD "/app0/ps5-yt-uploader.elf"
 
@@ -131,7 +131,7 @@ int main(void) {
     }
     if (up) {
         sceUserServiceInitialize(NULL);
-        if (sceSystemServiceLaunchWebBrowser("http://127.0.0.1:" "8888", NULL))
+        if (sceSystemServiceLaunchWebBrowser("http://127.0.0.1:" "8085", NULL))
             notify("YouTube Uploader running: open %s from a phone or PC", url);
     }
     sleep(2);

@@ -1,9 +1,9 @@
 # YouTube Uploader for PS5
 
-Browse your PlayStation 5 gameplay clips (`/user/av_content/video`, `/data`, and USB drives) and upload them **directly from the console to YouTube Studio**, controlled from the TV browser or your phone/PC at `http://<console-ip>:8888`.
+Browse your PlayStation 5 gameplay clips (`/user/av_content/video`, `/data`, and USB drives) and upload them **directly from the console to YouTube Studio**, controlled from the TV browser or your phone/PC at `http://<console-ip>:8085`.
 
 - **One-time sign-in with YouTube Studio cookies** (no Google Cloud project, no API key setup, no 6-video daily quota, and no forced Private lock):
-  - Run `python3 tools/yt-login.py http://<console-ip>:8888` once on your Mac/PC (opens an isolated browser window, signs in, pushes cookies + channel metadata to the console, and closes cleanly so daily browsing doesn't invalidate them; add `--choose-channel` for Brand Accounts).
+  - Run `python3 tools/yt-login.py http://<console-ip>:8085` once on your Mac/PC (opens an isolated browser window, signs in, pushes cookies + channel metadata to the console, and closes cleanly so daily browsing doesn't invalidate them; add `--choose-channel` for Brand Accounts).
   - Or scan the **Phone QR** code shown in the TV UI and upload/paste `cookies.txt` from your phone.
 - **Clip Browser & Range Video Preview:** Scans `/user/av_content/video` (plus `/data` and mounted `/mnt/usbN` / `/mnt/extN` drives), groups by Game Title ID, marks already-uploaded clips with clickable `youtu.be` links, and previews videos in-browser before uploading.
 - **Manual Curation & Resumable Background Queue:** Edit Title, Description, Privacy (*Unlisted*, *Public*, *Private*), Audience (*Made for Kids*), and optional Playlist ID. Uploads stream directly from disk via YouTube's Scotty resumable protocol with live progress, speed, ETA, Pause, Resume, Retry, and Cancel — surviving network drops and console restarts.
@@ -18,9 +18,9 @@ There are two pieces, modeled on [`torbox-ps5`](https://github.com/roieeedouek/t
 | Piece | What it is | Why |
 |---|---|---|
 | `ps5-yt-uploader.elf` | Background web server and uploader payload for `elfldr` (port `9021`). | Lives independently of games: uploads keep running in the background while you play. |
-| `PPSA97631` title | Home-screen tile **"YouTube Uploader"**. Opening it starts `ps5-yt-uploader.elf` via `127.0.0.1:9021` if not running yet, opens the PS5 browser on `http://127.0.0.1:8888`, and exits. | One click from the PS5 home screen without losing uploads when switching games. |
+| `PPSA97631` title | Home-screen tile **"YouTube Uploader"**. Opening it starts `ps5-yt-uploader.elf` via `127.0.0.1:9021` if not running yet, opens the PS5 browser on `http://127.0.0.1:8085`, and exits. | One click from the PS5 home screen without losing uploads when switching games. |
 
-> Runs on port `8888` with Title ID `PPSA97631`, so it coexists cleanly alongside `torbox-ps5` (`8080` / `PPSA97630`).
+> Runs on port `8085` with Title ID `PPSA97631`, so it coexists cleanly alongside `torbox-ps5` (`8080` / `PPSA97630`) and PS5 Web File Manager (`8888`).
 
 ---
 
@@ -41,7 +41,7 @@ You need FTP access to the console (e.g. `ftpsrv` / `zftpd`), `elfldr` on port `
         -Q "SITE CHMOD 755 /data/homebrew/PPSA97631/sce_module/libc.prx" "$H/data/homebrew/PPSA97631/"
    ```
 2. Register the title with ShadowMountPlus. **YouTube Uploader** appears on your PS5 home screen.
-3. Open the tile — the payload starts, shows a notification toast with `http://<console-ip>:8888`, and opens the PS5 browser.
+3. Open the tile — the payload starts, shows a notification toast with `http://<console-ip>:8085`, and opens the PS5 browser.
 
 ### Option 2: Payload Only / PS5 Payload Manager
 
@@ -53,10 +53,10 @@ You need FTP access to the console (e.g. `ftpsrv` / `zftpd`), `elfldr` on port `
 
 ## Sign In & Upload
 
-1. Open `http://<console-ip>:8888` on your Mac/PC or scan the **Phone QR** code on your TV.
+1. Open `http://<console-ip>:8085` on your Mac/PC or scan the **Phone QR** code on your TV.
 2. Run the one-time login helper on your Mac/PC (requires Chrome/Chromium/Edge/Brave or Playwright):
    ```sh
-   python3 tools/yt-login.py http://<console-ip>:8888
+   python3 tools/yt-login.py http://<console-ip>:8085
    ```
    *(Add `--choose-channel` if your channel is under a Brand Account so you can pick the channel before confirming.)*
    Or upload/paste a Netscape `cookies.txt` file or raw `Cookie:` header directly in the web UI.

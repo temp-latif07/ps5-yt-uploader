@@ -29,7 +29,7 @@ rm -f "$unit_bin"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ps5yt-test.XXXXXX")
 mkdir -p "$work/app" "$work/cap/PPSA01234" "$work/extra"
-mport=18999 port=18888
+mport=18999 port=18085
 export base=http://127.0.0.1:$port
 export mbase=http://127.0.0.1:$mport
 pids=()
