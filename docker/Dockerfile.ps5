@@ -1,0 +1,73 @@
+FROM --platform=linux/amd64 ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl wget unzip xz-utils git build-essential \
+    clang-18 lld-18 llvm-18 llvm-18-dev cmake autoconf automake \
+    libtool pkg-config python3 zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN for t in clang clang++ lld ld.lld llvm-config llvm-ar llvm-ranlib llvm-strip llvm-nm; do \
+        if [ -e "/usr/bin/${t}-18" ] && [ ! -e "/usr/local/bin/${t}" ]; then \
+            ln -sf "/usr/bin/${t}-18" "/usr/local/bin/${t}"; \
+        fi; \
+    done
+
+# Install ps5-payload-dev SDK
+RUN mkdir -p /tmp/sdk /opt/deps && cd /tmp/sdk && \
+    curl -fsSL https://github.com/ps5-payload-dev/sdk/releases/latest/download/ps5-payload-sdk.zip -o sdk.zip && \
+    unzip -q sdk.zip && rm -f sdk.zip && \
+    if [ -d ps5-payload-sdk ]; then mv ps5-payload-sdk /opt/deps/ps5-sdk-full; \
+    else mv /tmp/sdk /opt/deps/ps5-sdk-full; fi && \
+    rm -rf /tmp/sdk
+
+ENV PS5_PAYLOAD_SDK=/opt/deps/ps5-sdk-full
+ENV HOMEBREW_PREFIX=/opt/deps/ps5-sdk-full/target/user/homebrew
+
+# Build static zlib, mbedTLS, and libcurl for PS5 payload target
+RUN set -eux; \
+    mkdir -p /tmp/deps-src "${HOMEBREW_PREFIX}/lib/pkgconfig" "${HOMEBREW_PREFIX}/include"; \
+    cd /tmp/deps-src; \
+    curl -fsSL https://zlib.net/fossils/zlib-1.3.1.tar.gz | tar -xz; \
+    CC="${PS5_PAYLOAD_SDK}/bin/prospero-clang" \
+    AR=/usr/local/bin/llvm-ar \
+    RANLIB=/usr/local/bin/llvm-ranlib \
+    CFLAGS="-O2" \
+    bash -c "cd zlib-1.3.1 && ./configure --prefix=${HOMEBREW_PREFIX} --static && make -j\$(nproc) && make install"; \
+    curl -fsSL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2 | tar -xj; \
+    "${PS5_PAYLOAD_SDK}/bin/prospero-cmake" -S mbedtls-3.6.2 -B mbedtls-build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="${HOMEBREW_PREFIX}" \
+        -DENABLE_TESTING=OFF -DENABLE_PROGRAMS=OFF \
+        -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON; \
+    cmake --build mbedtls-build -j"$(nproc)"; \
+    cmake --install mbedtls-build; \
+    curl -fsSL https://curl.se/download/curl-8.11.1.tar.gz | tar -xz; \
+    "${PS5_PAYLOAD_SDK}/bin/prospero-cmake" -S curl-8.11.1 -B curl-build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="${HOMEBREW_PREFIX}" \
+        -DCMAKE_PREFIX_PATH="${HOMEBREW_PREFIX}" \
+        -DBUILD_SHARED_LIBS=OFF -DBUILD_STATIC_LIBS=ON -DBUILD_CURL_EXE=OFF \
+        -DBUILD_TESTING=OFF -DCURL_DISABLE_TESTS=ON \
+        -DCURL_USE_MBEDTLS=ON -DCURL_USE_OPENSSL=OFF -DCURL_ZLIB=ON \
+        -DZLIB_INCLUDE_DIR="${HOMEBREW_PREFIX}/include" \
+        -DZLIB_LIBRARY="${HOMEBREW_PREFIX}/lib/libz.a" \
+        -DMBEDTLS_INCLUDE_DIRS="${HOMEBREW_PREFIX}/include" \
+        -DMBEDTLS_LIBRARY="${HOMEBREW_PREFIX}/lib/libmbedtls.a" \
+        -DMBEDX509_LIBRARY="${HOMEBREW_PREFIX}/lib/libmbedx509.a" \
+        -DMBEDCRYPTO_LIBRARY="${HOMEBREW_PREFIX}/lib/libmbedcrypto.a" \
+        -DCURL_USE_LIBPSL=OFF -DUSE_LIBIDN2=OFF -DCURL_BROTLI=OFF -DCURL_ZSTD=OFF \
+        -DUSE_NGHTTP2=OFF -DCURL_USE_LIBSSH2=OFF \
+        -DHTTP_ONLY=ON -DENABLE_UNIX_SOCKETS=OFF -DENABLE_ARES=OFF; \
+    cmake --build curl-build -j"$(nproc)"; \
+    cmake --install curl-build; \
+    rm -rf /tmp/deps-src
+
+# Install PS5_Vulkan native title packaging tool (build/host/ps5-native-tool + app_crt + libc.prx)
+RUN set -eux; \
+    git clone --depth 1 https://github.com/mihawk-99/PS5_Vulkan.git /opt/deps/ps5-vulkan; \
+    cd /opt/deps/ps5-vulkan; \
+    if [ -f Makefile ]; then make build/host/ps5-native-tool; fi; \
+    test -x /opt/deps/ps5-vulkan/build/host/ps5-native-tool; \
+    test -f /opt/deps/ps5-vulkan/runtime/libc.prx

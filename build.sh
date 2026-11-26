@@ -94,9 +94,17 @@ build_payload() {
     if [[ -x $sdk/bin/prospero-clang ]]; then
         gen_assets
         local hb=$sdk/target/user/homebrew
+        local libs=()
+        if [[ -x $sdk/bin/prospero-pkg-config ]] && \
+           PS5_PAYLOAD_SDK=$sdk PKG_CONFIG_PATH="$hb/lib/pkgconfig" "$sdk/bin/prospero-pkg-config" --exists libcurl 2>/dev/null; then
+            read -r -a libs <<< "$(PS5_PAYLOAD_SDK=$sdk PKG_CONFIG_PATH="$hb/lib/pkgconfig" "$sdk/bin/prospero-pkg-config" --static --libs libcurl)"
+            libs+=(-lpthread)
+        else
+            libs=(-lcurl -lssl -lcrypto -lz -lpthread)
+        fi
         mkdir -p "$out"
         PS5_PAYLOAD_SDK=$sdk "$sdk/bin/prospero-clang" -O2 "${warn[@]}" -DCURL_STATICLIB -I"$here/src" -I"$hb/include" \
-            "${srcs[@]}" "$out/gen/assets.c" -L"$hb/lib" -lcurl -lpsl -lssl -lcrypto -lzstd -lz -lpthread \
+            "${srcs[@]}" "$out/gen/assets.c" -L"$hb/lib" "${libs[@]}" \
             -o "$out/ps5-yt-uploader.elf"
         "$sdk/bin/llvm-strip" --strip-debug "$out/ps5-yt-uploader.elf" 2>/dev/null || true
         echo "payload: $out/ps5-yt-uploader.elf ($(file_size "$out/ps5-yt-uploader.elf") bytes)"

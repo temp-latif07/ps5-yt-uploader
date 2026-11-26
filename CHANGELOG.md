@@ -6,145 +6,27 @@ What's new in ps5-yt-uploader, written for humans.
 
 ## Unreleased
 
-Planned improvements and upcoming fixes for subsequent releases.
+Planned improvements and upcoming fixes.
 
 ---
 
-## 1.0.7
+## 2.0.0
 
-Removal of invalid kernel symbols to prevent startup crash, restoration of canonical 3120-byte notification request layout, and immediate visual startup confirmation toast.
-
-**Fixes**
-- **Startup Crash Prevention (Removed Invalid Kernel Symbol):** Removed speculative `sceKernelSetProcessName` and `pthread_set_name_np` calls at process entry. In production PS5 firmware (7.00–12.20), `sceKernelSetProcessName` does not exist in `libkernel.sprx` and resolved to `0x0`, causing an immediate segmentation fault before startup code or notifications could run.
-- **Canonical Notification Struct (`3120` bytes):** Reverted the notification request structure to John Törnblom's canonical layout (`unused[45]`, `message[3075]`, zero-initialized) tested across all PS5 firmware versions. Custom icon URI and user ID overrides that caused notification rejections have been eliminated.
-- **Immediate Startup Notification:** Dispatched `ps5-yt-uploader started!` at the very beginning of execution so users receive instant visual confirmation on screen the moment the payload executes.
-
----
-
-## 1.0.6
-
-Network subsystem initialization, browser launch sequencing, on-screen notification targets, and active process naming for PlayStation 5.
-
-**Fixes**
-- **PS5 Network Subsystem Initialization (`sceNetInit`):** Initialized `libSceNet` prior to creating HTTP server listening sockets, preventing immediate process exit on PS5 hardware.
-- **Browser Launch Sequencing:** Deferred WebKit browser dispatch until after the local HTTP server and REST API routes are fully bound and listening, resolving "Cannot connect to server" errors on launch.
-- **PS5 Notification Struct & Active User Target:** Corrected notification request structure to target active logged-in users (`target_id = -1`) and specify the system icon URI (`cxml://psnotification/tex_icon_system`), ensuring on-screen TV toasts display reliably.
-- **Process & Thread Identification (`ps5-yt-uploader`):** Invoked `pthread_set_name_np()` and `sceKernelSetProcessName()` at startup so process inspection tools can identify the process as `ps5-yt-uploader` rather than generic `payload.elf`.
-
-**Behind the scenes**
-- **`payload.elf` Build Alias:** Added `bin/payload.elf` build symlink in `Makefile` for seamless compatibility with payload uploaders and autoloader scripts expecting default naming.
-
----
-
-## 1.0.5
-
-Linker script resolution, 16 KB page alignment, emulated TLS, and robust host process execution for PlayStation 5.
-
-**Fixes**
-- **Linker Script & Dynamic Linker Relocation Fix (`elf_x86_64.x`):** Resolved the critical issue where the ELF payload crashed immediately on execution before reaching `main()`. Linking with the authentic PS5 linker script defines `__image_start`, `__image_end`, and `_DYNAMIC` in the binary symbol table. Previously, missing symbols caused `_DYNAMIC` to resolve to `0x0`, leading to an immediate NULL-pointer dereference in the embedded `rtld` dynamic loader (`rtld_payload.c`).
-- **16 KB PS5 Page Alignment (`-z max-page-size=0x4000`):** Enforced 16 KB segment alignment matching PS5 Prospero virtual memory requirements, preventing mapping conflicts when loaded by `elfldr`.
-- **Emulated Thread-Local Storage (`-femulated-tls`):** Added emulated TLS compiler and linker flags (`-mllvm -emulated-tls`) to eliminate TLS relocation traps in multi-threaded subsystems.
-- **Host Process CLI Argument Tolerance:** When launched into background daemons (such as `SceSpZeroConf`), arbitrary host process command line arguments are now gracefully tolerated with a diagnostic warning rather than triggering CLI parsing errors.
-- **Fallback Data Directory:** Added runtime fallback to `/tmp/youtube_uploader` if the primary `/data` partition is permission-restricted.
-- **User Service Initialization:** Initialized `sceUserService` before launching the native browser from home screen tile events.
-
-**Behind the scenes**
-- **Vendored Linker Script (`vendor/ps5-sdk/ldscripts/`):** Added the official PlayStation 5 LLVM linker script to the repository for fully reproducible, single-command cross-compilation.
-
----
-
-## 1.0.4
-
-Automatic PS5 home screen tile installation, instant browser launch, and authentic PS5 Payload SDK toolchain integration.
+Ground-up rebuild modeled on the `torbox-ps5` architecture for rock-solid reliability on the PS5 home screen, in the PS5 browser, and on phones/PCs.
 
 **New**
-- **Automatic Home Screen Tile Registration (itsPLK Architecture):** Running `ps5-yt-uploader.elf` once via Payload Manager now automatically provisions and registers the YouTube Uploader tile directly onto the PlayStation 5 home screen. Writes `/user/app/PS5YT0001/sce_sys/` with embedded `param.json` and 512x512 `icon0.png`, invokes `libSceAppInstUtil` (`sceAppInstUtilAppInstallTitleDir` / `sceAppInstUtilAppInstallAll`), and fires a confirmation toast. Clicking the home screen tile launches directly into the local Web Companion Studio.
-- **Automatic Companion Browser Launch:** On payload execution, the daemon automatically launches the native PS5 WebKit browser directly to `http://127.0.0.1:8888/` via `sceSystemServiceLaunchWebBrowser`.
-- **Embedded Shortcut Assets:** Integrated `scripts/bundle_shortcut.py` and `src/shortcut_assets.h` into the build system to embed tile metadata and icon assets directly within the ELF binary without external asset files.
+- **Dedicated Home-Screen Launcher Tile (`PPSA97631`):** Installs under `/data/homebrew/PPSA97631/` via ShadowMountPlus. Opening it starts the background payload via `elfldr` (port `9021`), opens the PS5 browser on `http://127.0.0.1:8888`, and exits cleanly so uploads continue while you play games.
+- **One-Time Isolated Login Helper (`tools/yt-login.py`):** Opens a temporary isolated browser window to YouTube Studio, saves your cookies and selected channel metadata to the PS5 (`--choose-channel` supported for Brand Accounts), and deletes the temporary profile so daily browsing does not rotate or break your session.
+- **Built-in Phone QR Code:** Scannable QR code in the TV UI (on the login screen and anytime from the header) to open the dashboard on your phone for easy cookie upload, metadata typing, previewing, and queue management.
+- **In-Browser Clip Preview:** Stream saved `.mp4` and `.webm` gameplay captures with full HTTP `Range` seeking right inside the web UI before uploading.
+- **Folder & USB Drive Browser:** Browse `/user/av_content/video`, `/data`, and mounted USB drives (`/mnt/usbN`, `/mnt/extN`).
+- **Safe Off-by-Default Auto-Upload:** Optional toggle in Settings records a timestamp watermark and ignores pre-existing captures, uploading only brand-new clips saved after you turn it on.
 
 **Fixes**
-- **PS5 Payload SDK Toolchain & Runtime Dynamic Linker (`crt1.o`):** Resolved the root cause preventing the ELF from starting on PS5. Switched compilation to the official Sony PlayStation 5 target (`-target x86_64-sie-ps5`) linked with `crt1.o`. This provides the genuine payload entry point (`_start`), initializes the in-payload `rtld` dynamic linker to resolve system libraries (`libkernel.sprx`, `libSceLibcInternal.sprx`, `libSceAppInstUtil.sprx`, `libSceSystemService.sprx`), and eliminates the FreeBSD `/libexec/ld-elf.so.1` interpreter that caused `elfldr` to abort.
-- **Eliminated Undefined `libcurl` Dynamic Symbols:** Guarded host `libcurl` dependencies in `src/http_client.c` behind `#ifndef PS5` and implemented a native PS5 client using `libSceHttp.sprx`, completely eliminating the 8 undefined `curl_*` symbols that prevented `elfldr` relocation.
-- **Instant Visual Startup Feedback:** Dispatched an immediate `notify_send("YouTube Uploader starting...")` banner at daemon startup, ensuring instant visual feedback on the TV when launched from Payload Manager.
+- **Reliable Static `libcurl` + mbedTLS Networking:** Replaced Sony `libSceHttp`/`libSceSsl` calls with static `libcurl` + embedded CA certificates, streaming directly from disk with zero 8 MiB chunk RAM buffers, live transfer speed/ETA, and fast pause/cancel.
+- **PS5 Socket & Thread Stability:** Guarded all HTTP server `accept()`/`recv()`/`send()` calls with `poll()`, enforced 1 MiB thread stacks, and added CSRF protection (`X-PS5YT`) and strict path/extension checks on video streaming.
+- **YouTube Studio `WEB_CREATOR` Flow:** Automatically extracts live Studio API keys and session metadata, persists `Set-Cookie` rotations via an atomic cookie jar, supports two-step `createvideo` + `metadata_update` (title, description, privacy, Made for Kids, playlist), and handles expired Scotty URLs (`410`) or partial metadata failures without creating duplicate uploads.
 
 **Behind the scenes**
-- **Self-Contained PS5 SDK (`vendor/ps5-sdk/`):** Bundled authentic PlayStation 5 headers and stubs directly in the repository for fast, reproducible local cross-compilation with zero external SDK installations required.
-- **E2E Toolchain Verification:** Extended `tests/test_e2e_integration.sh` to strictly verify zero unresolved `curl` symbols, absence of `.interp`, and verified DT_NEEDED linkage of `libSceAppInstUtil.sprx`.
-
----
-
-## 1.0.3
-
-Manual clip curation studio, authentic PS5 libkernel toast notifications, clean FreeBSD 12 ELF symbol isolation, and itsPLK homescreen shortcut integration.
-
-**New**
-- **Manual Clip Selection & Metadata Curation Studio.** Automatic background uploading is now disabled by default, giving users complete manual control. Select any recorded clip from your console and customize its Title, Description, Privacy (*Public*, *Unlisted*, or *Private*), Audience (*Made for Kids* COPPA compliance), and optional YouTube Playlist ID before initiating upload.
-- **Homescreen Shortcut Generator (`itsPLK` Model).** Added `scripts/generate_shortcut.py` and `make shortcut` to produce an offline WebKit AppCache homescreen application package (`sce_sys/param.json` + `icon0.png`) targeting Title ID `PS5YT0001`, enabling a native home screen tile that boots directly into the local Web Companion Studio.
-- **Authentic Dual-Mode Architecture.** Documented both operating models in README: running as a headless background daemon managed via PS5 Payload Manager, with optional TV home screen tile installation via the WebKit AppCache shortcut format.
-
-**Fixes**
-- **Authentic PS5 Toast Notifications (`libkernel`).** Replaced non-existent `sceNotificationRequest` with authentic Sony `libkernel` ABI `sceKernelSendNotificationRequest`, ensuring upload progress, completion links, and error toasts reliably render in the top-right corner of the PS5 TV display.
-- **Darwin SDK Header Sanitization & Symbol Isolation.** Resolved cross-compilation symbol pollution on macOS hosts where Apple SDK headers redirected standard POSIX APIs to Darwin-specific symbol aliases (`_stat$INODE64`, `_opendir$INODE64`, `_close`, `_DefaultRuneLocale`, `__maskrune`, `__memcpy_chk`, `__sprintf_chk`). Created `include/ps5_shim.h` to enforce clean-room C99/POSIX symbol linkage for FreeBSD 12 ELF payloads, eliminating `elfldr` runtime dynamic linker termination.
-- **Eliminated Host SQLite3 Runtime Dependency.** Stubbed out direct MMS SQLite3 database injections under PS5 compilation targets, preventing payload startup crashes on locked WAL-mode system databases.
-
-**Behind the scenes**
-- **Curated Upload Verification Suite.** Extended test coverage with automated unit and integration tests across `tests/test_youtube_upload.c`, `tests/test_server_api.c`, `tests/test_web_assets.c`, and `tests/test_shortcut_generator.py`.
-- **E2E Integration Test Alignment.** Updated E2E integration test suite to explicitly toggle auto-upload during simulated test captures while verifying default disabled status on virgin boot.
-
----
-
-## 1.0.2
-
-PlayStation 5 UI/UX overhaul and accessibility refinement across the embedded companion dashboard.
-
-**New**
-- **PlayStation 5 Midnight theme & elevated depth.** Redesigned the companion web dashboard using an authentic PS5 dark aesthetic with rich navy-slate surfaces, architectural layering, and refined elevation shadows instead of artificial glow effects.
-- **Unified SVG vector iconography.** Replaced system-dependent emojis with a lightweight, inline SVG icon system (16px and 20px, 2px stroke) ensuring identical visual fidelity across PS5 WebKit, mobile browsers, and desktop screens.
-- **Authentic DualSense controller glyphs.** Added custom PlayStation controller button shapes (Cross ✕, Circle ○, Triangle △, and D-Pad) to the TV couch navigation guide with accurate hardware colors.
-- **Enhanced TV 10-foot navigation.** Polished couch navigation with a crisp 2px solid cyan focus ring (`outline: 2px solid #38bdf8; outline-offset: 3px; transform: scale(1.02);`), eliminating blurry halos while ensuring visibility from 10 feet.
-
-**Fixes**
-- **WCAG AA contrast compliance.** Replaced the low-contrast gradient badge with high-contrast authentic PlayStation navy (`#003791`), exceeding 6.8:1 contrast ratio, and calibrated all button normal/hover state contrast ratios above 4.5:1.
-- **Accessible motion & pulse.** Eliminated continuous sliding marquee loop animations on indeterminate upload progress bars in favor of an accessible, non-distracting gradient pulse.
-- **Typographic balance.** Applied `text-wrap: balance` to headings and `text-wrap: pretty` to body copy to prevent awkward text orphans and stragglers across viewports.
-
-**Behind the scenes**
-- **Impeccable design verification.** Verified the entire web companion surface against Impeccable's design quality detector with zero antipatterns or contrast warnings.
-- **Optimized asset bundling.** Embedded the updated web assets into `src/web_assets.h` within an ultra-lean 88 KB footprint, keeping the compiled FreeBSD ELF payload at ~164 KB (< 700 KB constraint).
-
----
-
-## 1.0.1
-
-Release and repository maintenance overhaul adopting the disciplined engineering standards of `phantomptr/ps5upload`.
-
-**New**
-- **Instant local release execution (`make release`).** Cut, verify, and publish official releases with binaries, checksums, and release notes in under 5 seconds directly from the developer machine via `gh release create`, completely bypassing slow cloud CI queues.
-- **Human-readable release notes extractor.** Automated `scripts/extract_release_notes.py` extracts release notes directly from `CHANGELOG.md` for any version tag, ensuring release notes are written for humans who use the console rather than raw git commit dumps.
-- **Repository maintenance standards (`AGENTS.md`).** Added comprehensive engineering and release rules adapted from `phantomptr/ps5upload` to guide autonomous agents and contributors.
-- **Dynamic test assertions.** Updated test suites to dynamically assert against `src/version.h` macros, ensuring seamless version bumps without broken test assertions.
-
-**Fixes**
-- **Dry-run release safety on tagged branches.** Fixed an issue where `scripts/release.sh --dry-run` failed if the version tag already existed locally.
-- **Non-interactive safety enforcement.** Explicitly mandated `-y` or `--yes` flags when running `scripts/release.sh` without a TTY to prevent accidental automated tagging.
-- **Payload artifact renaming.** Standardized primary ELF binary to `ps5-yt-uploader.elf` across the build system, catalog manifest, test suites, and documentation, while retaining `bin/ps5-youtube.elf` as a backward-compatible symlink.
-
----
-
-## 1.0.0
-
-Initial public release of the PS5 YouTube Uploader (`ps5-yt-uploader`) for jailbroken PlayStation 5 consoles.
-
-**New**
-- **Autonomous gameplay uploads directly from PS5 SSD to YouTube.** Watches `/user/av_content/video/` for new clips saved via the DualSense "Create" button, streaming MP4/WebM video captures directly to personal YouTube channels using YouTube Studio's internal Scotty resumable upload protocol.
-- **Dedicated Media home screen launcher tile.** Injects an official tile directly into the PS5 home screen **Media** category (via embedded `tbl_appbrowse` MMS database patch) that launches a fullscreen 1080p WebKit dashboard navigable via DualSense controller.
-- **Local Web Companion on port 8888.** Provides a responsive web dashboard accessible over local Wi-Fi from any phone, tablet, or PC (`http://<ps5-ip>:8888`), featuring a dynamic QR code for instant 10-second credential pairing.
-- **1-Click PS5 Payload Manager integration.** Provides a live, specification-compliant custom payload repository (`payloads.json`) for `itsPLK/ps5-payload-manager`, supporting direct installation into `/data/payloads/` and automated startup autoloading.
-- **Native PS5 system notifications.** Pops up on-screen toast notifications (`sceNotificationRequest`) when an upload begins, succeeds (including short `youtu.be` link), or encounters network interruptions.
-- **Zero Google Cloud accounts and zero quota limits.** Authenticates via standard YouTube Studio session tokens, completely eliminating Google Cloud API keys, project registration, credit card requirements, and the 10,000-unit daily API quota cap.
-
-**Behind the scenes**
-- **Clean-room C implementation.** 100% open-source C99 codebase targeting FreeBSD 12 ELF PIE executables with zero proprietary Sony SDK libraries, leaked decryption keys, or DRM circumvention.
-- **Ultra-lean daemon footprint.** Stripped ELF binary compiles at ~154 KB with idle RAM usage under 4 MB and CPU utilization under 0.1%, ensuring zero performance impact on 60/120 FPS gaming.
-- **Resilient resumable chunking.** Network disconnections during upload automatically query Scotty byte offsets and resume streaming from the exact interruption byte without restarting.
-- **Backward-compatible payload aliasing.** Automated Makefile targets and release assets provide both `ps5-yt-uploader.elf` and `ps5-youtube.elf` symlinks for compatibility with existing homebrew launcher scripts.
+- **Reproducible Build & Docker Cross-Toolchain:** Single `./build.sh` script (`host | payload | title | package | release | all`) with `docker/Dockerfile.ps5` and comprehensive host E2E tests against `tests/mock_youtube.py`.
+- **Reference Archive:** Preserved the original implementation under `archive/`.
