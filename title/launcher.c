@@ -100,6 +100,14 @@ static void local_ip(char *out, size_t len) {
     close(s);
 }
 
+// app_crt.cpp calls ps5_fp_ieee() before _init_env() to set standard IEEE-754 MXCSR/x87 state.
+__attribute__((weak, visibility("hidden"))) void ps5_fp_ieee(void) {
+    const unsigned mxcsr = 0x1f80;
+    const unsigned short cw = 0x37f;
+    __asm__ volatile("ldmxcsr %0" : : "m"(mxcsr));
+    __asm__ volatile("fldcw %0" : : "m"(cw));
+}
+
 // A title must exit through the system service, never return normally or call exit().
 void catchReturnFromMain(int status) {
     (void)status;

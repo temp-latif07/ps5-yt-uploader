@@ -29,6 +29,7 @@ static char g_app_dir[512];
 static char g_captures_dir[512];
 static pthread_mutex_t g_log_lock = PTHREAD_MUTEX_INITIALIZER;
 
+#ifndef __PROSPERO__
 static void resolve_host_path(char *dst, size_t len, const char *val) {
     if (!val || !val[0]) {
         dst[0] = 0;
@@ -48,6 +49,7 @@ static void resolve_host_path(char *dst, size_t len, const char *val) {
     size_t n = strlen(dst);
     while (n > 1 && dst[n - 1] == '/') dst[--n] = 0;
 }
+#endif
 
 void plat_init(void) {
 #ifdef __PROSPERO__

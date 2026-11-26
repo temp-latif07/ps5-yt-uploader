@@ -68,6 +68,8 @@ RUN set -eux; \
 RUN set -eux; \
     git clone --depth 1 https://github.com/mihawk-99/PS5_Vulkan.git /opt/deps/ps5-vulkan; \
     cd /opt/deps/ps5-vulkan; \
-    if [ -f Makefile ]; then make build/host/ps5-native-tool; fi; \
+    bash tools/rebuild-libc.sh; \
+    mkdir -p /opt/deps/ps5-vulkan/build/host; \
+    cp /opt/deps/ps5-vulkan/build/runtime-shim/ps5-native-tool /opt/deps/ps5-vulkan/build/host/ps5-native-tool; \
     test -x /opt/deps/ps5-vulkan/build/host/ps5-native-tool; \
     test -f /opt/deps/ps5-vulkan/runtime/libc.prx

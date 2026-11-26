@@ -19,7 +19,7 @@ warn=(-std=c99 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Wno-un
 docker_image=${PS5YT_DOCKER_IMAGE:-ps5-yt-uploader-sdk:latest}
 
 file_size() {
-    stat -f %z "$1" 2>/dev/null || stat -c %s "$1"
+    stat -c %s "$1" 2>/dev/null || stat -f %z "$1"
 }
 
 find_ca() {
@@ -103,10 +103,14 @@ build_payload() {
             libs=(-lcurl -lssl -lcrypto -lz -lpthread)
         fi
         mkdir -p "$out"
-        PS5_PAYLOAD_SDK=$sdk "$sdk/bin/prospero-clang" -O2 "${warn[@]}" -DCURL_STATICLIB -I"$here/src" -I"$hb/include" \
+        PS5_PAYLOAD_SDK=$sdk "$sdk/bin/prospero-clang" -O2 "${warn[@]}" -D_XOPEN_SOURCE=700 -DCURL_STATICLIB -I"$here/src" -I"$hb/include" \
             "${srcs[@]}" "$out/gen/assets.c" -L"$hb/lib" "${libs[@]}" \
             -o "$out/ps5-yt-uploader.elf"
-        "$sdk/bin/llvm-strip" --strip-debug "$out/ps5-yt-uploader.elf" 2>/dev/null || true
+        local strip_bin="$sdk/bin/llvm-strip"
+        [[ -x $strip_bin ]] || strip_bin=$(command -v llvm-strip || command -v llvm-strip-18 || true)
+        if [[ -n $strip_bin ]]; then
+            "$strip_bin" --strip-debug "$out/ps5-yt-uploader.elf" 2>/dev/null || true
+        fi
         echo "payload: $out/ps5-yt-uploader.elf ($(file_size "$out/ps5-yt-uploader.elf") bytes)"
     else
         run_in_docker ./build.sh payload
