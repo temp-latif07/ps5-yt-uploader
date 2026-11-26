@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YouTube Uploader for PS5</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <img src="favicon.svg" alt="" width="26" height="26">
+    <span>YouTube Uploader <small>for PS5</small></span>
+  </div>
+  <div class="top-right">
+    <button id="btn-qr" type="button" class="small">Phone QR</button>
+    <div id="conn" class="pill">connecting...</div>
+  </div>
+</header>
+
+<main>
+  <section id="login" class="card hidden">
+    <h2>Sign in to YouTube Studio</h2>
+    <p class="muted">Sign in once from your Mac/PC using the helper script, or scan the QR code to upload a <code>cookies.txt</code> file from your phone.</p>
+
+    <div class="login-grid">
+      <div class="subcard">
+        <h3>1. One-time Mac / PC login</h3>
+        <p class="muted small">Opens an isolated browser window to YouTube Studio, saves your session to the PS5, and closes cleanly so daily browsing does not expire it.</p>
+        <div class="row">
+          <code id="helper-cmd" class="cmd grow">python3 tools/yt-login.py http://127.0.0.1:8888</code>
+          <button id="copy-cmd" type="button" class="small">Copy</button>
+        </div>
+        <p class="muted small">Using a Brand Account? Add <code>--choose-channel</code> to switch channels before confirming.</p>
+      </div>
+
+      <div class="subcard qr-box">
+        <h3>2. Open on your phone</h3>
+        <div id="login-qr" class="qr-svg" aria-label="QR code to open this page on your phone"></div>
+        <code id="qr-url" class="small"></code>
+      </div>
+    </div>
+
+    <form id="login-form" autocomplete="off">
+      <h3>Or import cookies manually</h3>
+      <div class="row wrap">
+        <label class="file-btn">Choose cookies.txt<input id="cookie-file" type="file" accept=".txt,text/plain"></label>
+        <span class="muted small">or paste Netscape <code>cookies.txt</code> / <code>Cookie:</code> header below</span>
+      </div>
+      <textarea id="cookies" rows="4" placeholder="Paste Netscape cookies.txt or Cookie: SAPISID=...; SID=...;" spellcheck="false" required></textarea>
+
+      <details class="brand-opts">
+        <summary>Brand Account / multiple channels (optional)</summary>
+        <div class="grid-3">
+          <label>Channel ID
+            <input id="login-channel-id" type="text" placeholder="UC..." spellcheck="false">
+          </label>
+          <label>Delegated Session ID (PageId)
+            <input id="login-delegated" type="text" placeholder="Optional PageId" spellcheck="false">
+          </label>
+          <label>Session Index (authuser)
+            <input id="login-sidx" type="text" placeholder="0" spellcheck="false">
+          </label>
+        </div>
+      </details>
+
+      <div class="row">
+        <button class="primary" type="submit">Log in</button>
+      </div>
+    </form>
+
+    <p class="muted small">Cookies are verified with YouTube Studio and stored <b>unencrypted</b> (mode 600) on the console in <code id="cookie-file-path">the app folder</code>. Log out to delete them. They are never shown again here.</p>
+    <p id="login-error" class="error"></p>
+  </section>
+
+  <section id="app" class="hidden">
+    <nav id="tabs" class="tabs" role="tablist">
+      <button type="button" data-tab="clips" class="active">Clips</button>
+      <button type="button" data-tab="uploads">Uploads <span id="badge" class="badge hidden">0</span></button>
+      <button type="button" data-tab="settings">Settings</button>
+    </nav>
+
+    <div id="clips-view">
+      <div class="folderbar card">
+        <label for="folder">Captures folder</label>
+        <div class="row">
+          <input id="folder" type="text" spellcheck="false" autocomplete="off">
+          <button id="browse" type="button">Browse</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <input id="filter" type="search" placeholder="Filter by clip or game ID">
+        <button id="refresh" type="button">Refresh</button>
+      </div>
+      <p id="clips-status" class="muted"></p>
+      <div id="clips"></div>
+    </div>
+
+    <div id="uploads-view" class="hidden">
+      <div class="toolbar">
+        <span class="grow muted small">Uploads stream in the background even while playing games.</span>
+        <button id="clear" type="button">Clear finished</button>
+      </div>
+      <div id="jobs"></div>
+      <p id="jobs-empty" class="muted">No uploads yet. Pick a clip in Clips to upload it to YouTube.</p>
+    </div>
+
+    <div id="settings-view" class="hidden">
+      <form id="settings-form" class="card">
+        <h3>Upload &amp; Capture Settings</h3>
+        <div class="settings-grid">
+          <label>Default privacy
+            <select id="set-privacy">
+              <option value="UNLISTED">Unlisted (link only)</option>
+              <option value="PUBLIC">Public</option>
+              <option value="PRIVATE">Private</option>
+            </select>
+          </label>
+          <label>Default audience (COPPA)
+            <select id="set-mfk">
+              <option value="0">Not made for kids</option>
+              <option value="1">Made for kids</option>
+            </select>
+          </label>
+          <label>Upload chunk size
+            <select id="set-chunk">
+              <option value="4">4 MB</option>
+              <option value="8">8 MB</option>
+              <option value="16">16 MB</option>
+            </select>
+          </label>
+          <label>Uploads at a time
+            <select id="set-parallel">
+              <option value="1">1</option>
+              <option value="2">2</option>
+            </select>
+          </label>
+        </div>
+        <label class="field-block">Default captures directory
+          <input id="set-captures" type="text" spellcheck="false">
+        </label>
+        <label class="check">
+          <input id="set-auto" type="checkbox">
+          <span><b>Auto-upload new captures</b> (off by default — only uploads brand-new clips recorded after turning this on, never existing clips)</span>
+        </label>
+        <div class="row">
+          <button type="submit" class="primary">Save settings</button>
+        </div>
+      </form>
+    </div>
+
+    <footer class="foot">
+      <span id="account" class="muted small"></span>
+      <span class="grow"></span>
+      <button id="logout" type="button" class="link">Log out</button>
+      <button id="quit" type="button" class="link danger">Stop server</button>
+    </footer>
+  </section>
+</main>
+
+<!-- Upload curation modal -->
+<div id="upload-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="up-title-hdr">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="up-title-hdr">Upload clip to YouTube</h3>
+      <button id="up-close" class="link" type="button">Close</button>
+    </div>
+    <p id="up-clip-info" class="muted small"></p>
+    <form id="upload-form" class="col">
+      <input id="up-path" type="hidden">
+      <label>Title
+        <input id="up-title" type="text" maxlength="100" required>
+      </label>
+      <label>Description
+        <textarea id="up-desc" rows="3"></textarea>
+      </label>
+      <div class="grid-2">
+        <label>Privacy
+          <select id="up-privacy">
+            <option value="UNLISTED">Unlisted</option>
+            <option value="PUBLIC">Public</option>
+            <option value="PRIVATE">Private</option>
+          </select>
+        </label>
+        <label>Audience (Made for Kids)
+          <select id="up-mfk">
+            <option value="0">No, not made for kids</option>
+            <option value="1">Yes, made for kids</option>
+          </select>
+        </label>
+      </div>
+      <label>Add to playlist ID (optional)
+        <input id="up-playlist" type="text" placeholder="PL..." spellcheck="false">
+      </label>
+      <p id="up-mfk-note" class="muted small hidden">Playlists cannot be assigned when a video is marked Made for Kids.</p>
+      <p id="up-error" class="error"></p>
+      <div class="row">
+        <button id="up-cancel" type="button">Cancel</button>
+        <span class="grow"></span>
+        <button id="up-submit" type="submit" class="primary">Queue upload</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Video preview modal -->
+<div id="preview-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="prev-title">
+  <div class="modal-box wide">
+    <div class="modal-head">
+      <h3 id="prev-title">Clip preview</h3>
+      <button id="prev-close" class="link" type="button">Close</button>
+    </div>
+    <video id="prev-video" controls playsinline preload="metadata"></video>
+    <p id="prev-meta" class="muted small"></p>
+  </div>
+</div>
+
+<!-- Phone QR modal -->
+<div id="qr-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="qr-modal-title">
+  <div class="modal-box center">
+    <div class="modal-head full">
+      <h3 id="qr-modal-title">Open on phone or PC</h3>
+      <button id="qr-close" class="link" type="button">Close</button>
+    </div>
+    <p class="muted small">Scan with your phone camera on the same Wi-Fi network:</p>
+    <div id="modal-qr" class="qr-svg"></div>
+    <div class="row full">
+      <input id="modal-qr-url" type="text" readonly>
+      <button id="modal-qr-copy" type="button">Copy</button>
+    </div>
+  </div>
+</div>
+
+<!-- Folder picker modal -->
+<div id="picker" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+  <div class="modal-box">
+    <div class="modal-head"><h3 id="picker-title">Choose a folder</h3><button id="picker-close" class="link" type="button">Close</button></div>
+    <div id="picker-roots" class="chips"></div>
+    <div class="row"><button id="picker-up" type="button">Up</button><code id="picker-path" class="grow"></code></div>
+    <p id="picker-free" class="muted small"></p>
+    <ul id="picker-dirs" class="dirs"></ul>
+    <p id="picker-error" class="error"></p>
+    <div class="row">
+      <span class="grow"></span>
+      <button id="picker-use" class="primary" type="button">Use this folder</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>
