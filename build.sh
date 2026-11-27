@@ -4,7 +4,7 @@
 #   ./build.sh host      Native build for testing on Mac/Linux     -> build/host/ps5-yt-uploader
 #   ./build.sh payload   PS5 payload for elfldr (port 9021)        -> build/ps5-yt-uploader.elf
 #   ./build.sh title     PS5 title (home-screen tile) PPSA97631    -> build/PPSA97631/
-#   ./build.sh package   payload + title + README in zip           -> build/ps5-yt-uploader-<version>.zip
+#   ./build.sh package   payload + title (.exfat/.zip) + README  -> build/ps5-yt-uploader-<version>.zip
 #   ./build.sh release   Cut/verify release via tools/release.sh
 #   ./build.sh all       host + payload + title + package
 set -euo pipefail
@@ -131,15 +131,18 @@ package() {
     [[ -f $out/PPSA97631/eboot.bin ]] || build_title
     local pkg=$out/ps5-yt-uploader-$version
     local tile_zip=$out/PPSA97631-home-screen-tile-$version.zip
-    rm -rf "$pkg" "$pkg.zip" "$tile_zip"
+    local tile_exfat=$out/PPSA97631-home-screen-tile-$version.exfat
+    rm -rf "$pkg" "$pkg.zip" "$tile_zip" "$tile_exfat"
     mkdir -p "$pkg"
     cp "$out/ps5-yt-uploader.elf" "$pkg/"
     cp -r "$out/PPSA97631" "$pkg/"
     cp "$here/README.md" "$pkg/"
     (cd "$out" && python3 -I -m zipfile -c "ps5-yt-uploader-$version.zip" "ps5-yt-uploader-$version")
     (cd "$out" && python3 -I -m zipfile -c "PPSA97631-home-screen-tile-$version.zip" "PPSA97631")
+    bash "$here/tools/make_exfat.sh" "$out/PPSA97631" "$tile_exfat"
     echo "package: $pkg.zip"
     echo "tile: $tile_zip"
+    echo "exfat: $tile_exfat"
 }
 
 case ${1:-all} in
