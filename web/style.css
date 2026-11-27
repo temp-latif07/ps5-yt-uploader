@@ -29,7 +29,7 @@ main { max-width: 920px; margin: 0 auto; padding: 12px 16px 40px; }
 h2 { margin: 0 0 6px; font-size: 20px; }
 h3 { margin: 0; font-size: 16px; }
 input, select, textarea, button { font: inherit; color: inherit; }
-input[type=text], input[type=search], textarea, select {
+input[type=text], input[type=password], input[type=search], textarea, select {
   width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); min-width: 0;
 }
 textarea { resize: vertical; }
@@ -58,9 +58,13 @@ code { font-size: 13px; overflow-wrap: anywhere; }
 @media (min-width: 720px) { .login-grid { grid-template-columns: 1.4fr 1fr; } }
 .qr-box { align-items: center; text-align: center; }
 .qr-svg svg { display: block; border-radius: 8px; border: 1px solid var(--line); }
-#login-form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.brand-opts { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg); }
-.brand-opts summary { cursor: pointer; font-size: 14px; color: var(--muted); }
+.steps { margin: 8px 0 12px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.device-code {
+  font: 700 32px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.14em; text-align: center; padding: 14px 16px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; user-select: all;
+}
+#oauth-config-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .grid-2, .grid-3, .settings-grid { display: grid; gap: 10px; grid-template-columns: 1fr; margin-top: 8px; }
 @media (min-width: 600px) {
   .grid-2, .settings-grid { grid-template-columns: 1fr 1fr; }

@@ -136,7 +136,17 @@ const QR = (() => {
   return { svg: encode };
 })();
 
-const state = { tab: "clips", status: null, clips: [], jobs: [], pollTimer: 0 };
+const state = {
+  tab: "clips",
+  status: null,
+  clips: [],
+  jobs: [],
+  pollTimer: 0,
+  deviceTimer: 0,
+  deviceGen: 0,
+  deviceFlow: null,
+  editingClient: false,
+};
 
 function el(tag, props, ...children) {
   const e = document.createElement(tag);
@@ -209,7 +219,14 @@ async function copyText(txt, okMsg) {
   }
 }
 
-// ---------- status & auth ----------
+function stopDeviceFlow() {
+  state.deviceGen++;
+  clearTimeout(state.deviceTimer);
+  state.deviceTimer = 0;
+  state.deviceFlow = null;
+}
+
+// ---------- status & OAuth ----------
 async function loadStatus() {
   try {
     state.status = await api("status");
@@ -225,24 +242,39 @@ async function loadStatus() {
 function renderStatus() {
   const s = state.status;
   const url = consoleUrl();
-  $("#helper-cmd").textContent = "python3 tools/yt-login.py " + url;
-  $("#qr-url").textContent = url;
-  $("#login-qr").innerHTML = QR.svg(url, 156);
+  $("#setup-qr").innerHTML = QR.svg(url, 168);
+  $("#setup-qr-url").textContent = url;
   $("#modal-qr").innerHTML = QR.svg(url, 220);
   $("#modal-qr-url").value = url;
+  $("#oauth-file-path").textContent = s.oauth_file || "oauth.txt";
 
   if (!s.logged_in) {
     $("#login").classList.remove("hidden");
     $("#app").classList.add("hidden");
-    $("#cookie-file-path").textContent = s.cookie_file || "cookies.txt";
-    $("#login-error").textContent = s.auth_error || "";
     clearTimeout(state.pollTimer);
+    $("#login-error").textContent = s.auth_error || "";
+
+    if (!s.has_client || state.editingClient) {
+      stopDeviceFlow();
+      $("#oauth-setup").classList.remove("hidden");
+      $("#oauth-signin").classList.add("hidden");
+      $("#cancel-edit-client").classList.toggle("hidden", !s.has_client);
+    } else {
+      $("#oauth-setup").classList.add("hidden");
+      $("#oauth-signin").classList.remove("hidden");
+      $("#client-id-hint").textContent = s.client_id_hint || "";
+      if (!state.deviceFlow) startDeviceFlow();
+    }
     return;
   }
+
+  stopDeviceFlow();
+  state.editingClient = false;
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
   const ch = s.channel || {};
   $("#account").textContent = "Signed in as " + (ch.name || "YouTube") + (ch.id ? " (" + ch.id + ")" : "") + " · " + s.mode + " " + s.version;
+  $("#set-client-hint").textContent = s.client_id_hint || "";
   if (!$("#folder").value) $("#folder").value = s.captures_dir;
   applySettingsForm(s.settings);
   showTab(state.tab);
@@ -259,7 +291,59 @@ function applySettingsForm(st) {
   $("#set-auto").checked = !!st.auto_upload;
 }
 
-$("#copy-cmd").addEventListener("click", () => copyText($("#helper-cmd").textContent, "Command copied"));
+async function startDeviceFlow() {
+  stopDeviceFlow();
+  const gen = state.deviceGen;
+  $("#login-error").textContent = "";
+  $("#device-code").textContent = "----";
+  $("#device-qr").innerHTML = "";
+  $("#device-status").textContent = "Requesting Google sign-in code...";
+  try {
+    const r = await api("oauth/start", {});
+    if (gen !== state.deviceGen) return;
+    state.deviceFlow = r;
+    $("#device-qr").innerHTML = QR.svg(r.verification_url, 200);
+    $("#device-url").href = r.verification_url;
+    $("#device-url").textContent = r.verification_url;
+    $("#device-code").textContent = r.user_code;
+    $("#device-status").textContent = "Waiting for approval on your phone or PC...";
+    state.deviceTimer = setTimeout(() => pollDeviceFlow(gen), (r.interval || 5) * 1000);
+  } catch (e) {
+    if (gen !== state.deviceGen) return;
+    $("#device-status").textContent = "Could not start sign-in";
+    $("#login-error").textContent = e.message;
+  }
+}
+
+async function pollDeviceFlow(gen) {
+  if (gen !== state.deviceGen || !state.deviceFlow) return;
+  try {
+    const r = await api("oauth/poll", {});
+    if (gen !== state.deviceGen) return;
+    if (r.state === "done") {
+      stopDeviceFlow();
+      toast("Signed in to YouTube");
+      await loadStatus();
+      loadClips();
+      return;
+    }
+    if (r.state === "pending" || r.state === "slow_down") {
+      $("#device-status").textContent = r.state === "slow_down"
+        ? "Waiting for approval on your phone or PC (backing off poll rate)..."
+        : "Waiting for approval on your phone or PC...";
+      state.deviceTimer = setTimeout(() => pollDeviceFlow(gen), (r.interval || 5) * 1000);
+      return;
+    }
+    stopDeviceFlow();
+    const msg = r.error || ("Sign-in " + (r.state || "failed"));
+    $("#device-status").textContent = msg;
+    $("#login-error").textContent = msg;
+  } catch (e) {
+    if (gen !== state.deviceGen) return;
+    state.deviceTimer = setTimeout(() => pollDeviceFlow(gen), 5000);
+  }
+}
+
 $("#btn-qr").addEventListener("click", () => {
   const url = consoleUrl();
   $("#modal-qr").innerHTML = QR.svg(url, 220);
@@ -270,37 +354,72 @@ $("#qr-close").addEventListener("click", () => $("#qr-modal").classList.add("hid
 $("#qr-modal").addEventListener("click", (ev) => { if (ev.target.id === "qr-modal") $("#qr-modal").classList.add("hidden"); });
 $("#modal-qr-copy").addEventListener("click", () => copyText($("#modal-qr-url").value, "URL copied"));
 
-$("#cookie-file").addEventListener("change", async (ev) => {
+$("#client-json-file").addEventListener("change", async (ev) => {
   const f = ev.target.files && ev.target.files[0];
   if (!f) return;
-  $("#cookies").value = await f.text();
-  toast("Loaded " + f.name);
-});
-
-$("#login-form").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const btn = ev.target.querySelector("button[type=submit]");
+  const txt = await f.text();
+  ev.target.value = "";
   $("#login-error").textContent = "";
-  btn.disabled = true; btn.textContent = "Checking with YouTube...";
   try {
-    state.status = await api("login", {
-      cookies: $("#cookies").value,
-      channel_id: $("#login-channel-id").value.trim(),
-      delegated_session_id: $("#login-delegated").value.trim(),
-      session_index: $("#login-sidx").value.trim(),
-    });
-    $("#cookies").value = "";
+    state.status = await api("oauth/config", { client_json: txt });
+    state.editingClient = false;
+    toast("Saved Client ID from " + f.name);
     renderStatus();
-    loadClips();
   } catch (e) {
     $("#login-error").textContent = e.message;
-  } finally {
-    btn.disabled = false; btn.textContent = "Log in";
   }
 });
 
+$("#oauth-config-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const btn = ev.target.querySelector("button[type=submit]");
+  $("#login-error").textContent = "";
+  btn.disabled = true; btn.textContent = "Saving...";
+  try {
+    state.status = await api("oauth/config", {
+      client_id: $("#client-id").value.trim(),
+      client_secret: $("#client-secret").value.trim(),
+    });
+    $("#client-id").value = "";
+    $("#client-secret").value = "";
+    state.editingClient = false;
+    renderStatus();
+  } catch (e) {
+    $("#login-error").textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = "Save Client ID";
+  }
+});
+
+$("#change-client").addEventListener("click", () => {
+  state.editingClient = true;
+  renderStatus();
+});
+$("#cancel-edit-client").addEventListener("click", () => {
+  state.editingClient = false;
+  renderStatus();
+});
+$("#new-device-code").addEventListener("click", startDeviceFlow);
+$("#copy-device-code").addEventListener("click", () => copyText($("#device-code").textContent, "Code copied"));
+
+async function clearClientConfig() {
+  if (!confirm("Reset and delete your stored Google Cloud Client ID and tokens from the console?")) return;
+  stopDeviceFlow();
+  try {
+    state.status = await api("oauth/config/clear", {});
+    state.clips = [];
+    state.editingClient = false;
+    toast("Client ID removed");
+    renderStatus();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+$("#clear-client-login").addEventListener("click", clearClientConfig);
+$("#reset-client").addEventListener("click", clearClientConfig);
+
 $("#logout").addEventListener("click", async () => {
-  if (!confirm("Log out and delete your stored YouTube cookies from the console?")) return;
+  if (!confirm("Sign out of YouTube? Your Client ID stays saved on the console for quick QR sign-in.")) return;
   await api("logout", {}).catch((e) => toast(e.message));
   state.clips = [];
   loadStatus();

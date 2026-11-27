@@ -4,7 +4,7 @@
 #   ./build.sh host      Native build for testing on Mac/Linux     -> build/host/ps5-yt-uploader
 #   ./build.sh payload   PS5 payload for elfldr (port 9021)        -> build/ps5-yt-uploader.elf
 #   ./build.sh title     PS5 title (home-screen tile) PPSA97631    -> build/PPSA97631/
-#   ./build.sh package   payload + title + helper + README in zip  -> build/ps5-yt-uploader-<version>.zip
+#   ./build.sh package   payload + title + README in zip           -> build/ps5-yt-uploader-<version>.zip
 #   ./build.sh release   Cut/verify release via tools/release.sh
 #   ./build.sh all       host + payload + title + package
 set -euo pipefail
@@ -134,7 +134,6 @@ package() {
     mkdir -p "$pkg"
     cp "$out/ps5-yt-uploader.elf" "$pkg/"
     cp -r "$out/PPSA97631" "$pkg/"
-    cp "$here/tools/yt-login.py" "$pkg/"
     cp "$here/README.md" "$pkg/"
     (cd "$out" && python3 -I -m zipfile -c "ps5-yt-uploader-$version.zip" "ps5-yt-uploader-$version")
     echo "package: $pkg.zip"

@@ -24,9 +24,7 @@ typedef struct {
     volatile int stop; // 1 = pause, 2 = cancel
     char path[1024], name[256];
     yt_video_meta meta;
-    char frontend_id[64];
     char upload_url[1024];
-    char scotty_id[128];
     char video_id[64];
     int64_t done, total, start_done, started_ms, finished_ms;
     double speed;
@@ -150,7 +148,7 @@ static void save_queue_locked(void) {
         write_escaped(f, j->meta.privacy, 0);
         fprintf(f, "%d\t", j->meta.made_for_kids ? 1 : 0);
         write_escaped(f, j->meta.playlist_id, 0);
-        write_escaped(f, j->frontend_id, 0);
+        write_escaped(f, "", 0); // reserved slot matching 12-column queue.tsv layout
         write_escaped(f, j->upload_url, 0);
         fprintf(f, "%lld\t%lld\t", (long long)j->done, (long long)j->total);
         write_escaped(f, j->err, 1);
@@ -210,7 +208,6 @@ static void load_queue(void) {
         unescape_field(j->meta.privacy, sizeof j->meta.privacy, cols[4]);
         j->meta.made_for_kids = atoi(cols[5]) ? 1 : 0;
         unescape_field(j->meta.playlist_id, sizeof j->meta.playlist_id, cols[6]);
-        unescape_field(j->frontend_id, sizeof j->frontend_id, cols[7]);
         unescape_field(j->upload_url, sizeof j->upload_url, cols[8]);
         j->done = (int64_t)strtoll(cols[9], NULL, 10);
         j->total = (int64_t)strtoll(cols[10], NULL, 10);
@@ -222,6 +219,20 @@ static void load_queue(void) {
 // ---------- worker execution ----------
 
 static void schedule_locked(void);
+
+static const char *mime_for_path(const char *path) {
+    size_t n = strlen(path);
+    if (n > 5 && !strcasecmp(path + n - 5, ".webm")) return "video/webm";
+    return "video/mp4";
+}
+
+static int ensure_access_token(char *tok, size_t tok_len, int force_refresh,
+                               int *invalid_grant, char *err, size_t errlen) {
+    if (invalid_grant) *invalid_grant = 0;
+    if (!force_refresh && net_token_cache_get(tok, tok_len) == 0) return 0;
+    net_token_cache_clear();
+    return yt_oauth_refresh(tok, tok_len, invalid_grant, err, errlen);
+}
 
 static void on_chunk_progress(int64_t delta, void *ud) {
     upload_job *j = ud;
@@ -250,30 +261,28 @@ static void fail_job(upload_job *j, const char *err) {
 static void *upload_worker(void *arg) {
     upload_job *j = arg;
     char err[300] = "";
+    char access_token[2048] = "";
+    int invalid_grant = 0;
 
-    yt_session sess;
-    if (net_session_get(&sess) != 0 || !sess.api_key[0] || !sess.channel_id[0]) {
-        char snap[640];
-        if (net_snapshot_jar(snap, sizeof snap) != 0) {
-            fail_job(j, "not logged in — sign in to YouTube first");
-            return NULL;
-        }
-        int vrc = yt_validate_and_bootstrap(snap, 1, &sess, err, sizeof err);
-        unlink(snap);
-        if (vrc <= 0) {
-            fail_job(j, err[0] ? err : "YouTube session expired — sign in again");
-            return NULL;
-        }
-        net_session_set(&sess);
+    if (!net_oauth_is_logged_in()) {
+        fail_job(j, "not signed in — scan QR to sign in to YouTube");
+        return NULL;
+    }
+    if (ensure_access_token(access_token, sizeof access_token, 0, &invalid_grant, err, sizeof err) != 0) {
+        memset(access_token, 0, sizeof access_token);
+        fail_job(j, err[0] ? err : "YouTube sign-in expired — scan QR to sign in again");
+        return NULL;
     }
 
     struct stat st;
     if (stat(j->path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) {
+        memset(access_token, 0, sizeof access_token);
         fail_job(j, "capture file is missing or empty");
         return NULL;
     }
     FILE *fp = fopen(j->path, "rb");
     if (!fp) {
+        memset(access_token, 0, sizeof access_token);
         fail_job(j, strerror(errno));
         return NULL;
     }
@@ -281,28 +290,39 @@ static void *upload_worker(void *arg) {
     pthread_mutex_lock(&g_lock);
     j->total = (int64_t)st.st_size;
     int chunk_mb = g_settings.chunk_mb > 0 ? g_settings.chunk_mb : 8;
-    if (!j->frontend_id[0])
-        snprintf(j->frontend_id, sizeof j->frontend_id, "ps5yt_%ld_%d", (long)time(NULL), j->id);
+    yt_video_meta meta = j->meta;
     char up_url[1024];
     snprintf(up_url, sizeof up_url, "%s", j->upload_url);
-    char fid[64];
-    snprintf(fid, sizeof fid, "%s", j->frontend_id);
     pthread_mutex_unlock(&g_lock);
 
+    const char *mime = mime_for_path(j->path);
     int64_t offset = 0;
     int already_final = 0;
-    char scotty_id[128] = "";
+    char video_id[64] = "";
     int http_status = 0;
+    int quota_exceeded = 0;
 
     for (int reinit = 0; reinit < 2; reinit++) {
         if (j->stop) break;
         if (up_url[0]) {
             int is_final = 0;
-            int qrc = yt_scotty_query(&sess, up_url, &offset, &is_final, scotty_id, sizeof scotty_id,
-                                      &http_status, err, sizeof err);
-            if (http_status == 401 || http_status == 403) {
+            int qrc = yt_upload_query(access_token, up_url, j->total, &offset, &is_final,
+                                      video_id, sizeof video_id, &http_status, err, sizeof err);
+            if (qrc != 0 && http_status == 401) {
+                if (ensure_access_token(access_token, sizeof access_token, 1, &invalid_grant, err, sizeof err) == 0) {
+                    qrc = yt_upload_query(access_token, up_url, j->total, &offset, &is_final,
+                                          video_id, sizeof video_id, &http_status, err, sizeof err);
+                } else {
+                    fclose(fp);
+                    memset(access_token, 0, sizeof access_token);
+                    fail_job(j, err[0] ? err : "YouTube sign-in expired — scan QR to sign in again");
+                    return NULL;
+                }
+            }
+            if (http_status == 401) {
                 fclose(fp);
-                fail_job(j, "YouTube session expired — sign in again");
+                memset(access_token, 0, sizeof access_token);
+                fail_job(j, "YouTube sign-in expired — scan QR to sign in again");
                 return NULL;
             }
             if (http_status == 404 || http_status == 410) {
@@ -318,18 +338,32 @@ static void *upload_worker(void *arg) {
             }
             if (qrc != 0) {
                 fclose(fp);
+                memset(access_token, 0, sizeof access_token);
                 fail_job(j, err[0] ? err : "cannot resume upload session");
                 return NULL;
             }
-            if (is_final && scotty_id[0]) {
+            if (is_final && video_id[0]) {
                 already_final = 1;
                 offset = j->total;
             }
             break;
         } else {
-            int irc = yt_scotty_init(&sess, fid, j->total, up_url, sizeof up_url, &http_status, err, sizeof err);
+            int irc = yt_upload_init(access_token, &meta, mime, j->total, up_url, sizeof up_url,
+                                     &http_status, &quota_exceeded, err, sizeof err);
+            if (irc != 0 && http_status == 401) {
+                if (ensure_access_token(access_token, sizeof access_token, 1, &invalid_grant, err, sizeof err) == 0) {
+                    irc = yt_upload_init(access_token, &meta, mime, j->total, up_url, sizeof up_url,
+                                         &http_status, &quota_exceeded, err, sizeof err);
+                } else {
+                    fclose(fp);
+                    memset(access_token, 0, sizeof access_token);
+                    fail_job(j, err[0] ? err : "YouTube sign-in expired — scan QR to sign in again");
+                    return NULL;
+                }
+            }
             if (irc != 0) {
                 fclose(fp);
+                memset(access_token, 0, sizeof access_token);
                 fail_job(j, err[0] ? err : "failed to initialize YouTube upload");
                 return NULL;
             }
@@ -344,6 +378,7 @@ static void *upload_worker(void *arg) {
 
     if (j->stop) {
         fclose(fp);
+        memset(access_token, 0, sizeof access_token);
         pthread_mutex_lock(&g_lock);
         j->state = j->stop == 2 ? U_CANCELLED : U_PAUSED;
         j->speed = 0;
@@ -365,55 +400,95 @@ static void *upload_worker(void *arg) {
     int retries = 0;
     const int max_retries = 5;
 
-    while (!already_final && offset <= j->total) {
+    while (!already_final && offset < j->total) {
         if (j->stop) break;
         int64_t rem = j->total - offset;
         int64_t clen = rem > chunk_bytes ? chunk_bytes : rem;
-        int is_final = (offset + clen >= j->total);
+        int64_t acked = offset;
+        quota_exceeded = 0;
 
-        int crc = yt_scotty_upload_chunk(&sess, up_url, fp, offset, clen, is_final,
-                                         on_chunk_progress, j, &j->stop,
-                                         scotty_id, sizeof scotty_id, &http_status, err, sizeof err);
+        int crc = yt_upload_chunk(access_token, up_url, fp, mime, offset, clen, j->total,
+                                  on_chunk_progress, j, &j->stop,
+                                  &acked, video_id, sizeof video_id, &http_status, &quota_exceeded,
+                                  err, sizeof err);
         if (j->stop) break;
-        if (crc == 0) {
-            retries = 0;
-            offset += clen;
+        if (crc != 0 && http_status == 401) {
             pthread_mutex_lock(&g_lock);
             j->done = offset;
-            if (is_final) snprintf(j->scotty_id, sizeof j->scotty_id, "%s", scotty_id);
+            pthread_mutex_unlock(&g_lock);
+            if (ensure_access_token(access_token, sizeof access_token, 1, &invalid_grant, err, sizeof err) == 0) {
+                crc = yt_upload_chunk(access_token, up_url, fp, mime, offset, clen, j->total,
+                                          on_chunk_progress, j, &j->stop,
+                                          &acked, video_id, sizeof video_id, &http_status, &quota_exceeded,
+                                          err, sizeof err);
+                if (j->stop) break;
+            } else {
+                fclose(fp);
+                memset(access_token, 0, sizeof access_token);
+                fail_job(j, err[0] ? err : "YouTube sign-in expired — scan QR to sign in again");
+                return NULL;
+            }
+        }
+        if (crc == 0) {
+            retries = 0;
+            offset = acked;
+            pthread_mutex_lock(&g_lock);
+            j->done = offset;
             save_queue_locked();
             pthread_mutex_unlock(&g_lock);
-            if (is_final) break;
+            if (video_id[0]) break;
             continue;
         }
 
-        if (http_status == 401 || http_status == 403) {
+        if (quota_exceeded) {
             fclose(fp);
-            fail_job(j, "YouTube session expired — sign in again");
+            memset(access_token, 0, sizeof access_token);
+            fail_job(j, err[0] ? err : "YouTube API daily upload quota reached — resets at midnight Pacific Time");
+            return NULL;
+        }
+        if (http_status == 401) {
+            fclose(fp);
+            memset(access_token, 0, sizeof access_token);
+            fail_job(j, "YouTube sign-in expired — scan QR to sign in again");
             return NULL;
         }
         if (++retries > max_retries) {
             fclose(fp);
+            memset(access_token, 0, sizeof access_token);
             fail_job(j, err[0] ? err : "upload interrupted — press Retry to resume");
             return NULL;
         }
-        plat_log("upload #%d: chunk error (%s), querying Scotty offset (retry %d/%d)",
+        plat_log("upload #%d: chunk error (%s), querying upload offset (retry %d/%d)",
                  j->id, err[0] ? err : "network drop", retries, max_retries);
         plat_sleep_ms(200);
         if (j->stop) break;
 
         int64_t srv_off = offset;
         int q_final = 0;
-        int qrc = yt_scotty_query(&sess, up_url, &srv_off, &q_final, scotty_id, sizeof scotty_id,
-                                  &http_status, err, sizeof err);
-        if (http_status == 401 || http_status == 403) {
+        int qrc = yt_upload_query(access_token, up_url, j->total, &srv_off, &q_final,
+                                  video_id, sizeof video_id, &http_status, err, sizeof err);
+        if (qrc != 0 && http_status == 401) {
+            if (ensure_access_token(access_token, sizeof access_token, 1, &invalid_grant, err, sizeof err) == 0) {
+                qrc = yt_upload_query(access_token, up_url, j->total, &srv_off, &q_final,
+                                      video_id, sizeof video_id, &http_status, err, sizeof err);
+            } else {
+                fclose(fp);
+                memset(access_token, 0, sizeof access_token);
+                fail_job(j, err[0] ? err : "YouTube sign-in expired — scan QR to sign in again");
+                return NULL;
+            }
+        }
+        if (http_status == 401) {
             fclose(fp);
-            fail_job(j, "YouTube session expired — sign in again");
+            memset(access_token, 0, sizeof access_token);
+            fail_job(j, "YouTube sign-in expired — scan QR to sign in again");
             return NULL;
         }
         if (http_status == 404 || http_status == 410) {
-            if (yt_scotty_init(&sess, fid, j->total, up_url, sizeof up_url, &http_status, err, sizeof err) != 0) {
+            if (yt_upload_init(access_token, &meta, mime, j->total, up_url, sizeof up_url,
+                               &http_status, &quota_exceeded, err, sizeof err) != 0) {
                 fclose(fp);
+                memset(access_token, 0, sizeof access_token);
                 fail_job(j, err[0] ? err : "upload session expired and re-init failed");
                 return NULL;
             }
@@ -428,7 +503,7 @@ static void *upload_worker(void *arg) {
             continue;
         }
         if (qrc == 0) {
-            if (q_final && scotty_id[0]) {
+            if (q_final && video_id[0]) {
                 already_final = 1;
                 break;
             }
@@ -446,6 +521,7 @@ static void *upload_worker(void *arg) {
     fclose(fp);
 
     if (j->stop) {
+        memset(access_token, 0, sizeof access_token);
         pthread_mutex_lock(&g_lock);
         j->state = j->stop == 2 ? U_CANCELLED : U_PAUSED;
         j->speed = 0;
@@ -456,29 +532,37 @@ static void *upload_worker(void *arg) {
         return NULL;
     }
 
+    if (!video_id[0]) {
+        memset(access_token, 0, sizeof access_token);
+        fail_job(j, err[0] ? err : "missing video id from YouTube");
+        return NULL;
+    }
+
     pthread_mutex_lock(&g_lock);
     j->state = U_FINALIZING;
     j->done = j->total;
     j->speed = 0;
-    yt_video_meta meta = j->meta;
     pthread_mutex_unlock(&g_lock);
 
-    char video_id[64] = "";
-    if (yt_create_video(&sess, fid, scotty_id, &meta, video_id, sizeof video_id, &http_status, err, sizeof err) != 0) {
-        fail_job(j, err[0] ? err : "failed to finalize video on YouTube");
-        return NULL;
-    }
-
-    // Immediately record video_id and mark uploaded so partial metadata failures never cause duplicate uploads.
+    // Record video_id immediately so subsequent playlist failure never duplicates the upload.
     clips_history_mark(j->path, video_id, meta.title);
 
     char note[256] = "";
-    char merr[256] = "";
-    if (yt_update_metadata(&sess, video_id, &meta, &http_status, merr, sizeof merr) != 0) {
-        plat_log("upload #%d: video %s created, but metadata_update failed: %s", j->id, video_id, merr);
-        snprintf(note, sizeof note, "Uploaded, but audience/playlist update failed (%s) — check YouTube Studio",
-                 merr[0] ? merr : "HTTP error");
+    if (!meta.made_for_kids && meta.playlist_id[0]) {
+        char perr[256] = "";
+        int prc = yt_playlist_add(access_token, meta.playlist_id, video_id, &http_status, perr, sizeof perr);
+        if (prc != 0 && http_status == 401) {
+            if (ensure_access_token(access_token, sizeof access_token, 1, &invalid_grant, perr, sizeof perr) == 0) {
+                prc = yt_playlist_add(access_token, meta.playlist_id, video_id, &http_status, perr, sizeof perr);
+            }
+        }
+        if (prc != 0) {
+            plat_log("upload #%d: video %s uploaded, but playlistItems failed: %s", j->id, video_id, perr);
+            snprintf(note, sizeof note, "Uploaded, but adding to playlist failed (%s) — check YouTube Studio",
+                     perr[0] ? perr : "HTTP error");
+        }
     }
+    memset(access_token, 0, sizeof access_token);
 
     pthread_mutex_lock(&g_lock);
     snprintf(j->video_id, sizeof j->video_id, "%s", video_id);
@@ -578,7 +662,7 @@ static void watcher_scan_once(void) {
     mfk = g_settings.made_for_kids;
     pthread_mutex_unlock(&g_lock);
 
-    if (!net_has_cookies()) return;
+    if (!net_oauth_is_logged_in()) return;
 
     clip_entry *arr = NULL;
     int n = 0;

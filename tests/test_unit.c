@@ -1,4 +1,4 @@
-// Unit tests for core utilities, SHA-1, JSON, path checks, and cookie/session management.
+// Unit tests for core utilities, JSON, path checks, and OAuth credential/token cache management.
 #include "app.h"
 
 #include <assert.h>
@@ -11,21 +11,6 @@
 const unsigned char cacert_pem[] = "";
 const size_t cacert_pem_len = 0;
 void api_handle(http_req *req) { (void)req; }
-
-static void test_sha1(void) {
-    char hex[41];
-    sha1_hex((const unsigned char *)"abc", 3, hex);
-    assert(!strcmp(hex, "a9993e364706816aba3e25717850c26c9cd0d89d"));
-
-    sha1_hex((const unsigned char *)"", 0, hex);
-    assert(!strcmp(hex, "da39a3ee5e6b4b0d3255bfef95601890afd80709"));
-
-    char hash[64];
-    assert(sapisid_hash("my_sapisid", "https://studio.youtube.com", 1700000000L, hash, sizeof hash) == 0);
-    assert(!strncmp(hash, "1700000000_", 11));
-    assert(strlen(hash) == 11 + 40);
-    printf("ok   sha1 & sapisid_hash\n");
-}
 
 static void test_json(void) {
     const char *doc = "{\"ok\":true,\"count\":42,\"msg\":\"hello \\\"world\\\"\\n\\u0041\",\"arr\":[10,{\"k\":\"v\"}],\"flag\":false}";
@@ -60,8 +45,8 @@ static void test_form_and_util(void) {
     assert(is_video_filename("clip.webm") == 1);
     assert(is_video_filename(".hidden.mp4") == 0);
     assert(is_video_filename(".mp4") == 0);
-    assert(is_video_filename("cookies.txt") == 0);
-    assert(is_video_filename("/data/ps5-yt-uploader/cookies.txt") == 0);
+    assert(is_video_filename("oauth.txt") == 0);
+    assert(is_video_filename("/data/ps5-yt-uploader/oauth.txt") == 0);
     printf("ok   form & video filename helpers\n");
 }
 
@@ -83,68 +68,83 @@ static void test_paths(void) {
     printf("ok   platform allowed paths\n");
 }
 
-static void test_cookies_and_session(void) {
+static void test_oauth_and_tokens(void) {
     setenv("PS5YT_APP_DIR", "/tmp/ps5yt_unit_net", 1);
-    unsetenv("PS5YT_STUDIO_URL");
     plat_init();
     net_init();
-    net_auth_clear();
+    net_oauth_clear_all();
 
-    sbuf jar;
-    char err[256] = "";
-    assert(net_normalize_cookies("SID=abc; HSID=xyz", &jar, err, sizeof err) == -1);
-    assert(strstr(err, "SAPISID") != NULL);
+    char cid[256], csec[256], err[256];
+    const char *installed_json =
+        "\xEF\xBB\xBF{\"installed\":{\"client_id\":\" 12345-abc.apps.googleusercontent.com \","
+        "\"project_id\":\"demo\",\"client_secret\":\" GOCSPX-secret-val \"}}";
+    assert(net_parse_client_json(installed_json, cid, sizeof cid, csec, sizeof csec, err, sizeof err) == 0);
+    assert(!strcmp(cid, "12345-abc.apps.googleusercontent.com"));
+    assert(!strcmp(csec, "GOCSPX-secret-val"));
 
-    assert(net_normalize_cookies("Cookie: SID=s123; SAPISID=sap_raw; LOGIN_INFO=li", &jar, err, sizeof err) == 0);
-    assert(strstr(jar.data, ".youtube.com\tTRUE\t/\tTRUE\t2147483647\tSAPISID\tsap_raw") != NULL);
-    sb_free(&jar);
+    const char *web_json = "{\"web\":{\"client_id\":\"web-id\",\"client_secret\":\"web-sec\"}}";
+    assert(net_parse_client_json(web_json, cid, sizeof cid, csec, sizeof csec, err, sizeof err) == 0);
+    assert(!strcmp(cid, "web-id") && !strcmp(csec, "web-sec"));
 
-    const char *netscape_in =
-        "# Netscape HTTP Cookie File\n"
-        ".example.com\tTRUE\t/\tFALSE\t2147483647\tIGNORE\tbad\n"
-        "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t2147483647\tSID\tsid_val\n"
-        ".youtube.com\tTRUE\t/\tTRUE\t2147483647\tSAPISID\tsap_net\n";
-    assert(net_normalize_cookies(netscape_in, &jar, err, sizeof err) == 0);
-    assert(strstr(jar.data, "IGNORE") == NULL);
-    assert(strstr(jar.data, "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t2147483647\tSID\tsid_val") != NULL);
+    const char *flat_json = "{\"client_id\":\"flat-id\",\"client_secret\":\"flat-sec\"}";
+    assert(net_parse_client_json(flat_json, cid, sizeof cid, csec, sizeof csec, err, sizeof err) == 0);
+    assert(!strcmp(cid, "flat-id") && !strcmp(csec, "flat-sec"));
 
-    char tmp[600], snap[600], val[128];
-    assert(net_write_temp_jar(jar.data, tmp, sizeof tmp) == 0);
-    sb_free(&jar);
-    assert(net_extract_cookie(tmp, "SAPISID", val, sizeof val) == 0 && !strcmp(val, "sap_net"));
-    assert(net_extract_cookie(tmp, "SID", val, sizeof val) == 0 && !strcmp(val, "sid_val"));
-    assert(net_commit_jar(tmp) == 0);
-    assert(net_has_cookies() == 1);
+    assert(net_parse_client_json("{\"installed\":{\"client_id\":\"only-id\"}}",
+                                 cid, sizeof cid, csec, sizeof csec, err, sizeof err) == -1);
+    assert(strstr(err, "client_secret") != NULL);
+    assert(net_parse_client_json("not json", cid, sizeof cid, csec, sizeof csec, err, sizeof err) == -1);
 
+    assert(net_oauth_has_client() == 0);
+    assert(net_oauth_is_logged_in() == 0);
+
+    yt_oauth o = {
+        "12345-abc.apps.googleusercontent.com",
+        "GOCSPX-secret-val",
+        "1//refresh-token",
+        "UC_CHANNEL_1",
+        "Test Gamer"
+    };
+    assert(net_oauth_set(&o) == 0);
     struct stat st;
-    assert(stat(net_cookie_path(), &st) == 0 && (st.st_mode & 0777) == 0600);
-    assert(net_snapshot_jar(snap, sizeof snap) == 0);
-    assert(strcmp(snap, net_cookie_path()) != 0);
-    assert(net_extract_cookie(snap, "SAPISID", val, sizeof val) == 0 && !strcmp(val, "sap_net"));
-    unlink(snap);
+    assert(stat(net_oauth_path(), &st) == 0 && (st.st_mode & 0777) == 0600);
+    assert(net_oauth_has_client() == 1);
+    assert(net_oauth_is_logged_in() == 1);
 
-    yt_session s = {"UC123", "My Channel", "109876", "1", "AIzaKey", "1.2026"};
-    assert(net_session_set(&s) == 0);
-    assert(stat(net_session_path(), &st) == 0 && (st.st_mode & 0777) == 0600);
-    yt_session loaded;
-    assert(net_session_get(&loaded) == 0);
-    assert(!strcmp(loaded.channel_id, "UC123"));
-    assert(!strcmp(loaded.channel_name, "My Channel"));
-    assert(!strcmp(loaded.delegated_session_id, "109876"));
-    assert(!strcmp(loaded.session_index, "1"));
-    assert(!strcmp(loaded.api_key, "AIzaKey"));
+    yt_oauth loaded;
+    assert(net_oauth_get(&loaded) == 0);
+    assert(!strcmp(loaded.client_id, o.client_id));
+    assert(!strcmp(loaded.client_secret, o.client_secret));
+    assert(!strcmp(loaded.refresh_token, o.refresh_token));
+    assert(!strcmp(loaded.channel_id, o.channel_id));
+    assert(!strcmp(loaded.channel_name, o.channel_name));
 
-    net_auth_clear();
-    assert(net_has_cookies() == 0);
-    printf("ok   cookies, jar isolation & session\n");
+    char tok[128];
+    net_token_cache_set("short-lived", 30);
+    assert(net_token_cache_get(tok, sizeof tok) == -1);
+    net_token_cache_set("valid-access-tok", 3600);
+    assert(net_token_cache_get(tok, sizeof tok) == 0 && !strcmp(tok, "valid-access-tok"));
+
+    net_oauth_clear_tokens();
+    assert(net_oauth_has_client() == 1);
+    assert(net_oauth_is_logged_in() == 0);
+    assert(net_token_cache_get(tok, sizeof tok) == -1);
+    assert(net_oauth_get(&loaded) == 0);
+    assert(!strcmp(loaded.client_id, o.client_id));
+    assert(!strcmp(loaded.client_secret, o.client_secret));
+    assert(loaded.refresh_token[0] == 0 && loaded.channel_id[0] == 0);
+
+    net_oauth_clear_all();
+    assert(net_oauth_has_client() == 0);
+    assert(net_oauth_get(&loaded) == -1);
+    printf("ok   OAuth JSON parsing, oauth.txt mode 600 & token cache\n");
 }
 
 int main(void) {
-    test_sha1();
     test_json();
     test_form_and_util();
     test_paths();
-    test_cookies_and_session();
+    test_oauth_and_tokens();
     printf("All unit tests passed!\n");
     return 0;
 }

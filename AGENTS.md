@@ -37,7 +37,6 @@ All version references must stay synchronized:
 Never tag or publish without passing all verification gates:
 ```bash
 bash tests/test_host.sh
-python3 tools/yt-login.py --self-test
 python3 tools/update_payloads.py --check payloads.json
 bash tools/release.sh --dry-run
 ```
@@ -70,8 +69,8 @@ bash tools/release.sh --dry-run
    - Ignore `SIGPIPE`; drain briefly on socket close (`shutdown(SHUT_WR)`).
    - Use canonical 3120-byte `sceKernelSendNotificationRequest` struct (`useless1[45]`, `message[3075]`) and `sceKernelDebugOutText` for klog.
 3. **Resumable Uploads & Concurrency:**
-   - Never let concurrent `libcurl` handles read/write live `cookies.txt`; snapshot into per-request temp jars and commit atomically (`0600`) via `net_commit_jar()`.
-   - Persist Scotty `upload_url` in `queue.tsv` so interrupted uploads resume via `x-goog-upload-command: query` (and re-init cleanly if `404`/`410` expired).
+   - Store OAuth client credentials and refresh token atomically (`0600`) in `/data/ps5-yt-uploader/oauth.txt` via `net_oauth_set()`, keeping access tokens strictly in an in-memory mutex-protected cache.
+   - Persist YouTube Data API v3 resumable `upload_url` in `queue.tsv` so interrupted uploads resume via `Content-Range: bytes */<total>` (`308` offset query) and re-init cleanly if `404`/`410` expired.
    - Enforce BOTH `plat_path_allowed()` and video extension validation in `/api/stream` and `/api/upload`.
    - Require `X-PS5YT` header on all `POST /api/*` routes.
 4. **Embedded Web Assets:** `tools/embed.py` compiles `web/*` and CA certificates into `build/gen/assets.c` automatically during `./build.sh`.
@@ -80,6 +79,6 @@ bash tools/release.sh --dry-run
 
 ## 5. Security & Git Hygiene
 
-1. **Credentials & Secrets:** Never commit `cookies.txt`, `session.txt`, or tokens. Never log cookies or `SAPISID` values.
+1. **Credentials & Secrets:** Never commit `oauth.txt`, `cookies.txt`, `session.txt`, `client_secret_*.json`, or tokens. Never log `client_secret`, `refresh_token`, `access_token`, or `device_code` values.
 2. **Conventional Commits:** `feat(...)`, `fix(...)`, `docs(...)`, `chore(...)`, `test(...)`.
 3. **Clean Diffs:** Inspect `git diff` before committing; keep `build/` and `ps5yt-data/` untracked.

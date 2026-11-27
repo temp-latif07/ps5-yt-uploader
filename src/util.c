@@ -164,9 +164,12 @@ void url_encode(const char *in, char *out, size_t len) {
 
 char *str_trim(char *s) {
     if (!s) return s;
-    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
-    size_t n = strlen(s);
-    while (n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\r' || s[n - 1] == '\n')) s[--n] = 0;
+    const char *p = s;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+    size_t n = strlen(p);
+    while (n && (p[n - 1] == ' ' || p[n - 1] == '\t' || p[n - 1] == '\r' || p[n - 1] == '\n')) n--;
+    if (p != s && n) memmove(s, p, n);
+    s[n] = 0;
     return s;
 }
 

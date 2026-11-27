@@ -1,4 +1,4 @@
-// YouTube Studio (WEB_CREATOR) bootstrap, Scotty resumable upload, and video creation/metadata client.
+// Google OAuth 2.0 TV Device Flow and YouTube Data API v3 resumable upload client.
 #include "app.h"
 
 #include <curl/curl.h>
@@ -6,35 +6,30 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <time.h>
-#include <unistd.h>
 
-#define STUDIO_ORIGIN "https://studio.youtube.com"
-#define DEFAULT_CLIENT_VER "1.20261126.00.00"
+#define YT_SCOPE "https://www.googleapis.com/auth/youtube"
 
-static char g_studio_url[512];
-static char g_scotty_url[512];
-static char g_innertube_base[512];
+static char g_oauth_base[512];
+static char g_api_base[512];
+static char g_upload_base[512];
+
+static void set_base_url(char *dst, size_t len, const char *env_name, const char *def_url) {
+    const char *u = getenv(env_name);
+    snprintf(dst, len, "%s", (u && u[0]) ? u : def_url);
+    size_t n = strlen(dst);
+    while (n > 1 && dst[n - 1] == '/') dst[--n] = 0;
+}
 
 static void ensure_urls(void) {
-    if (!g_studio_url[0]) {
-        const char *u = getenv("PS5YT_STUDIO_URL");
-        snprintf(g_studio_url, sizeof g_studio_url, "%s", u && u[0] ? u : "https://studio.youtube.com/");
-    }
-    if (!g_scotty_url[0]) {
-        const char *u = getenv("PS5YT_SCOTTY_URL");
-        snprintf(g_scotty_url, sizeof g_scotty_url, "%s", u && u[0] ? u : "https://upload.youtube.com/upload/studio");
-    }
-    if (!g_innertube_base[0]) {
-        const char *u = getenv("PS5YT_INNERTUBE_BASE");
-        snprintf(g_innertube_base, sizeof g_innertube_base, "%s", u && u[0] ? u : "https://studio.youtube.com/youtubei/v1");
-    }
+    if (!g_oauth_base[0]) set_base_url(g_oauth_base, sizeof g_oauth_base, "PS5YT_OAUTH_BASE", "https://oauth2.googleapis.com");
+    if (!g_api_base[0]) set_base_url(g_api_base, sizeof g_api_base, "PS5YT_API_BASE", "https://www.googleapis.com/youtube/v3");
+    if (!g_upload_base[0]) set_base_url(g_upload_base, sizeof g_upload_base, "PS5YT_UPLOAD_BASE", "https://www.googleapis.com/upload/youtube/v3");
 }
 
 void yt_init(void) {
-    g_studio_url[0] = 0;
-    g_scotty_url[0] = 0;
-    g_innertube_base[0] = 0;
+    g_oauth_base[0] = 0;
+    g_api_base[0] = 0;
+    g_upload_base[0] = 0;
     ensure_urls();
     curl_global_init(CURL_GLOBAL_DEFAULT);
 }
@@ -45,233 +40,40 @@ static size_t write_sbuf(char *p, size_t sz, size_t n, void *ud) {
     return sb_add(b, p, sz * n) ? 0 : sz * n;
 }
 
-static int build_auth_header(const char *jar_path, char *out, size_t len) {
-    char sap[512] = "", p1[512] = "", p3[512] = "";
-    int has_sap = (net_extract_cookie(jar_path, "SAPISID", sap, sizeof sap) == 0);
-    int has_1p = (net_extract_cookie(jar_path, "__Secure-1PAPISID", p1, sizeof p1) == 0);
-    int has_3p = (net_extract_cookie(jar_path, "__Secure-3PAPISID", p3, sizeof p3) == 0);
-    if (!has_sap && !has_3p) {
-        memset(sap, 0, sizeof sap);
-        memset(p1, 0, sizeof p1);
-        memset(p3, 0, sizeof p3);
-        return -1;
-    }
-
-    long now = (long)time(NULL);
-    sbuf b;
-    sb_init(&b);
-    sb_puts(&b, "Authorization: ");
-    int parts = 0;
-    char h[128];
-
-    const char *primary = has_sap ? sap : p3;
-    if (sapisid_hash(primary, STUDIO_ORIGIN, now, h, sizeof h) == 0) {
-        sb_printf(&b, "%sSAPISIDHASH %s", parts++ ? " " : "", h);
-    }
-    if (has_1p && sapisid_hash(p1, STUDIO_ORIGIN, now, h, sizeof h) == 0) {
-        sb_printf(&b, "%sSAPISID1PHASH %s", parts++ ? " " : "", h);
-    }
-    if (has_3p && sapisid_hash(p3, STUDIO_ORIGIN, now, h, sizeof h) == 0) {
-        sb_printf(&b, "%sSAPISID3PHASH %s", parts++ ? " " : "", h);
-    }
-
-    memset(sap, 0, sizeof sap);
-    memset(p1, 0, sizeof p1);
-    memset(p3, 0, sizeof p3);
-    memset(h, 0, sizeof h);
-
-    if (!parts || !b.data || b.len >= len) {
-        sb_free(&b);
-        return -1;
-    }
-    memcpy(out, b.data, b.len + 1);
-    memset(b.data, 0, b.len);
-    sb_free(&b);
-    return 0;
-}
-
-static struct curl_slist *add_session_headers(struct curl_slist *hdr, const char *auth_hdr, const yt_session *s) {
-    if (auth_hdr && auth_hdr[0]) hdr = curl_slist_append(hdr, auth_hdr);
-    hdr = curl_slist_append(hdr, "Origin: " STUDIO_ORIGIN);
-    hdr = curl_slist_append(hdr, "Referer: " STUDIO_ORIGIN "/");
-    char idx_hdr[48];
-    snprintf(idx_hdr, sizeof idx_hdr, "X-Goog-AuthUser: %s",
-             s && s->session_index[0] ? s->session_index : "0");
-    hdr = curl_slist_append(hdr, idx_hdr);
-    if (s && s->delegated_session_id[0]) {
-        char pid_hdr[128];
-        snprintf(pid_hdr, sizeof pid_hdr, "X-Goog-PageId: %s", s->delegated_session_id);
-        hdr = curl_slist_append(hdr, pid_hdr);
-    }
+static struct curl_slist *append_bearer(struct curl_slist *hdr, const char *access_token) {
+    char auth[2200];
+    snprintf(auth, sizeof auth, "Authorization: Bearer %s", access_token ? access_token : "");
+    hdr = curl_slist_append(hdr, auth);
+    memset(auth, 0, sizeof auth);
     hdr = curl_slist_append(hdr, "Expect:");
     return hdr;
 }
 
-// Finds `"key": "value"` anywhere in an HTML/JSON payload and unescapes the JSON string.
-static int extract_embedded_json_str(const char *haystack, const char *key, char *out, size_t len) {
-    if (!haystack || !key || !out || !len) return -1;
-    size_t kl = strlen(key);
-    const char *p = haystack;
-    while ((p = strstr(p, key)) != NULL) {
-        if (p > haystack && p[-1] == '"' && p[kl] == '"') {
-            int ok_prev = (p - 1 == haystack) || p[-2] == '{' || p[-2] == ',' ||
-                          p[-2] == ' ' || p[-2] == '\t' || p[-2] == '\n' || p[-2] == '\r';
-            if (ok_prev) {
-                const char *q = p + kl + 1;
-                while (*q == ' ' || *q == '\t' || *q == '\r' || *q == '\n') q++;
-                if (*q == ':') {
-                    q++;
-                    while (*q == ' ' || *q == '\t' || *q == '\r' || *q == '\n') q++;
-                    if (*q == '"' && json_string(q, out, len) == 0 && out[0]) return 0;
-                }
-            }
-        }
-        p += kl;
-    }
-    return -1;
+static void extract_oauth_err(const char *body, char *err_code, size_t code_len,
+                              char *desc, size_t desc_len) {
+    if (err_code && code_len) err_code[0] = 0;
+    if (desc && desc_len) desc[0] = 0;
+    if (!body) return;
+    const char *ev = json_find(body, "error");
+    if (ev && *ev == '"' && err_code && code_len) json_string(ev, err_code, code_len);
+    const char *dv = json_find(body, "error_description");
+    if (dv && *dv == '"' && desc && desc_len) json_string(dv, desc, desc_len);
 }
 
-static void copy_file_fallback(const char *src, const char *dst) {
-    FILE *in = fopen(src, "rb");
-    if (!in) return;
-    FILE *out = fopen(dst, "wb");
-    if (!out) {
-        fclose(in);
-        return;
-    }
-    char buf[4096];
-    size_t r;
-    while ((r = fread(buf, 1, sizeof buf, in)) > 0) fwrite(buf, 1, r, out);
-    fclose(in);
-    fclose(out);
-}
-
-int yt_validate_and_bootstrap(const char *jar_path, int commit_jar, yt_session *sess, char *err, size_t errlen) {
-    ensure_urls();
-    if (!jar_path || !sess) return -1;
-
-    char out_jar[640];
-    snprintf(out_jar, sizeof out_jar, "%s.out", jar_path);
-
-    char url[768];
-    if (sess->channel_id[0] && !strstr(g_studio_url, "/channel/")) {
-        size_t bl = strlen(g_studio_url);
-        snprintf(url, sizeof url, "%s%schannel/%s", g_studio_url, (bl && g_studio_url[bl - 1] == '/') ? "" : "/",
-                 sess->channel_id);
-    } else {
-        snprintf(url, sizeof url, "%s", g_studio_url);
-    }
-    if (sess->session_index[0] && strcmp(sess->session_index, "0") != 0) {
-        size_t ul = strlen(url);
-        snprintf(url + ul, sizeof url - ul, "%sauthuser=%s", strchr(url, '?') ? "&" : "?", sess->session_index);
-    }
-
-    CURL *c = curl_easy_init();
-    if (!c) {
-        if (err && errlen) snprintf(err, errlen, "curl init failed");
-        return -1;
-    }
-
-    struct curl_slist *hdr = add_session_headers(NULL, NULL, sess);
-    sbuf body;
-    sb_init(&body);
-
-    net_apply(c);
-    curl_easy_setopt(c, CURLOPT_URL, url);
-    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
-    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(c, CURLOPT_MAXREDIRS, 5L);
-    curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(c, CURLOPT_TIMEOUT, 30L);
-    curl_easy_setopt(c, CURLOPT_COOKIEFILE, jar_path);
-    curl_easy_setopt(c, CURLOPT_COOKIEJAR, out_jar);
-    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_sbuf);
-    curl_easy_setopt(c, CURLOPT_WRITEDATA, &body);
-
-    CURLcode rc = curl_easy_perform(c);
-    long status = 0;
-    char *eff = NULL;
-    if (rc == CURLE_OK) {
-        curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
-        curl_easy_getinfo(c, CURLINFO_EFFECTIVE_URL, &eff);
-    } else if (err && errlen) {
-        snprintf(err, errlen, "%s", curl_easy_strerror(rc));
-    }
-    int is_login_redirect = (eff && (strstr(eff, "accounts.google.com") != NULL || strstr(eff, "ServiceLogin") != NULL));
-
-    curl_slist_free_all(hdr);
-    curl_easy_cleanup(c);
-
-    if (rc != CURLE_OK) {
-        sb_free(&body);
-        unlink(out_jar);
-        return -1;
-    }
-    if (is_login_redirect || status == 401 || status == 403) {
-        if (err && errlen) snprintf(err, errlen, "YouTube cookies expired or signed out");
-        sb_free(&body);
-        unlink(out_jar);
-        return 0;
-    }
-    if (status < 200 || status >= 400 || !body.data) {
-        if (err && errlen) snprintf(err, errlen, "YouTube Studio answered HTTP %ld", status);
-        sb_free(&body);
-        unlink(out_jar);
-        return -1;
-    }
-
-    char key[128] = "", ver[64] = "", cid[64] = "", del[64] = "", sidx[16] = "", cname[160] = "";
-    extract_embedded_json_str(body.data, "INNERTUBE_API_KEY", key, sizeof key);
-    extract_embedded_json_str(body.data, "INNERTUBE_CLIENT_VERSION", ver, sizeof ver);
-    extract_embedded_json_str(body.data, "CHANNEL_ID", cid, sizeof cid);
-    extract_embedded_json_str(body.data, "DELEGATED_SESSION_ID", del, sizeof del);
-    extract_embedded_json_str(body.data, "SESSION_INDEX", sidx, sizeof sidx);
-    if (extract_embedded_json_str(body.data, "CHANNEL_TITLE", cname, sizeof cname) != 0 &&
-        extract_embedded_json_str(body.data, "channelTitle", cname, sizeof cname) != 0 &&
-        extract_embedded_json_str(body.data, "channelName", cname, sizeof cname) != 0 &&
-        extract_embedded_json_str(body.data, "accountName", cname, sizeof cname) != 0) {
-        extract_embedded_json_str(body.data, "authorName", cname, sizeof cname);
-    }
-    sb_free(&body);
-
-    if (key[0]) snprintf(sess->api_key, sizeof sess->api_key, "%s", key);
-    if (ver[0]) snprintf(sess->client_version, sizeof sess->client_version, "%s", ver);
-    else if (!sess->client_version[0]) snprintf(sess->client_version, sizeof sess->client_version, DEFAULT_CLIENT_VER);
-    if (!sess->channel_id[0] && cid[0]) snprintf(sess->channel_id, sizeof sess->channel_id, "%s", cid);
-    if (!sess->delegated_session_id[0] && del[0]) snprintf(sess->delegated_session_id, sizeof sess->delegated_session_id, "%s", del);
-    if (!sess->session_index[0]) snprintf(sess->session_index, sizeof sess->session_index, "%s", sidx[0] ? sidx : "0");
-    if (cname[0]) snprintf(sess->channel_name, sizeof sess->channel_name, "%s", cname);
-    else if (!sess->channel_name[0]) snprintf(sess->channel_name, sizeof sess->channel_name, "YouTube Channel");
-
-    if (!sess->api_key[0] || !sess->channel_id[0]) {
-        if (err && errlen) snprintf(err, errlen, "could not verify YouTube Studio session (cookies may be expired)");
-        unlink(out_jar);
-        return 0;
-    }
-
-    if (commit_jar) {
-        if (net_commit_jar(out_jar) != 0) {
-            unlink(out_jar);
-            if (err && errlen) snprintf(err, errlen, "could not save validated cookies");
-            return -1;
-        }
-    } else {
-        copy_file_fallback(out_jar, jar_path);
-        unlink(out_jar);
-    }
-    return 1;
+static int response_has_quota_err(const char *body) {
+    if (!body) return 0;
+    return strstr(body, "quotaExceeded") != NULL || strstr(body, "uploadLimitExceeded") != NULL;
 }
 
 typedef struct {
-    char upload_url[1024];
-    char status[64];
-    int64_t size_received;
-    int has_size_received;
-} scotty_hdrs;
+    char location[1024];
+    int64_t range_end;
+    int has_range;
+} upload_hdrs;
 
-static size_t capture_scotty_headers(char *p, size_t sz, size_t n, void *ud) {
+static size_t capture_upload_headers(char *p, size_t sz, size_t n, void *ud) {
     size_t len = sz * n;
-    scotty_hdrs *sh = ud;
+    upload_hdrs *uh = ud;
     char line[1200];
     size_t cpy = len < sizeof line - 1 ? len : sizeof line - 1;
     memcpy(line, p, cpy);
@@ -282,211 +84,17 @@ static size_t capture_scotty_headers(char *p, size_t sz, size_t n, void *ud) {
     if (colon) {
         *colon = 0;
         char *val = str_trim(colon + 1);
-        if (!strcasecmp(line, "x-goog-upload-url") || (!strcasecmp(line, "Location") && !sh->upload_url[0])) {
-            snprintf(sh->upload_url, sizeof sh->upload_url, "%s", val);
-        } else if (!strcasecmp(line, "x-goog-upload-status")) {
-            snprintf(sh->status, sizeof sh->status, "%s", val);
-        } else if (!strcasecmp(line, "x-goog-upload-size-received")) {
-            sh->size_received = (int64_t)strtoll(val, NULL, 10);
-            sh->has_size_received = 1;
+        if (!strcasecmp(line, "Location")) {
+            snprintf(uh->location, sizeof uh->location, "%s", val);
+        } else if (!strcasecmp(line, "Range")) {
+            char *dash = strchr(val, '-');
+            if (dash && dash[1] >= '0' && dash[1] <= '9') {
+                uh->range_end = (int64_t)strtoll(dash + 1, NULL, 10);
+                uh->has_range = 1;
+            }
         }
     }
     return len;
-}
-
-static int parse_scotty_id(const char *body, char *out, size_t len) {
-    if (!body || !out || !len) return -1;
-    out[0] = 0;
-    const char *top = json_find(body, "scottyResourceId");
-    if (top && *top == '"' && json_string(top, out, len) == 0 && out[0]) return 0;
-    const char *res = json_find(body, "resourceId");
-    if (res) {
-        const char *sc = json_find(res, "scottyResourceId");
-        if (sc) {
-            const char *id = json_find(sc, "id");
-            if (id && json_string(id, out, len) == 0 && out[0]) return 0;
-        }
-    }
-    return extract_embedded_json_str(body, "scottyResourceId", out, len);
-}
-
-int yt_scotty_init(const yt_session *s, const char *frontend_id, int64_t file_size,
-                   char *upload_url_out, size_t url_len, int *http_status, char *err, size_t errlen) {
-    ensure_urls();
-    if (http_status) *http_status = 0;
-    if (!s || !frontend_id || !upload_url_out || !url_len) return -1;
-
-    char snap[640];
-    if (net_snapshot_jar(snap, sizeof snap) != 0) {
-        if (err && errlen) snprintf(err, errlen, "not logged in");
-        return -1;
-    }
-    char auth[512];
-    if (build_auth_header(snap, auth, sizeof auth) != 0) {
-        unlink(snap);
-        if (http_status) *http_status = 401;
-        if (err && errlen) snprintf(err, errlen, "YouTube session expired — sign in again");
-        return -1;
-    }
-
-    char url[640];
-    snprintf(url, sizeof url, "%s%sauthuser=%s", g_scotty_url, strchr(g_scotty_url, '?') ? "&" : "?",
-             s->session_index[0] ? s->session_index : "0");
-
-    sbuf jbody;
-    sb_init(&jbody);
-    sb_puts(&jbody, "{\"frontendUploadId\":");
-    sb_json_str(&jbody, frontend_id);
-    sb_puts(&jbody, "}");
-
-    char len_hdr[64];
-    snprintf(len_hdr, sizeof len_hdr, "x-goog-upload-header-content-length: %lld", (long long)file_size);
-
-    struct curl_slist *hdr = add_session_headers(NULL, auth, s);
-    memset(auth, 0, sizeof auth);
-    hdr = curl_slist_append(hdr, "x-goog-upload-command: start");
-    hdr = curl_slist_append(hdr, "x-goog-upload-protocol: resumable");
-    hdr = curl_slist_append(hdr, len_hdr);
-    hdr = curl_slist_append(hdr, "x-goog-upload-header-content-type: application/octet-stream");
-    hdr = curl_slist_append(hdr, "Content-Type: application/json; charset=UTF-8");
-
-    CURL *c = curl_easy_init();
-    if (!c) {
-        unlink(snap);
-        curl_slist_free_all(hdr);
-        sb_free(&jbody);
-        return -1;
-    }
-
-    scotty_hdrs sh;
-    memset(&sh, 0, sizeof sh);
-    sbuf resp;
-    sb_init(&resp);
-
-    net_apply(c);
-    curl_easy_setopt(c, CURLOPT_URL, url);
-    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
-    curl_easy_setopt(c, CURLOPT_COOKIEFILE, snap);
-    curl_easy_setopt(c, CURLOPT_POST, 1L);
-    curl_easy_setopt(c, CURLOPT_POSTFIELDS, jbody.data);
-    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)jbody.len);
-    curl_easy_setopt(c, CURLOPT_TIMEOUT, 30L);
-    curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, capture_scotty_headers);
-    curl_easy_setopt(c, CURLOPT_HEADERDATA, &sh);
-    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_sbuf);
-    curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
-
-    CURLcode rc = curl_easy_perform(c);
-    long status = 0;
-    if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
-    else if (err && errlen) snprintf(err, errlen, "%s", curl_easy_strerror(rc));
-
-    curl_slist_free_all(hdr);
-    curl_easy_cleanup(c);
-    unlink(snap);
-    sb_free(&jbody);
-    sb_free(&resp);
-
-    if (http_status) *http_status = (int)status;
-    if (rc != CURLE_OK) return -1;
-    if (status == 401 || status == 403) {
-        if (err && errlen) snprintf(err, errlen, "YouTube session expired — sign in again");
-        return -1;
-    }
-    if ((status != 200 && status != 201) || !sh.upload_url[0]) {
-        if (err && errlen) snprintf(err, errlen, "Scotty upload init failed (HTTP %ld)", status);
-        return -1;
-    }
-    if (strlen(sh.upload_url) >= url_len) {
-        if (err && errlen) snprintf(err, errlen, "Scotty upload URL too long");
-        return -1;
-    }
-    snprintf(upload_url_out, url_len, "%s", sh.upload_url);
-    return 0;
-}
-
-int yt_scotty_query(const yt_session *s, const char *upload_url, int64_t *offset_out, int *is_final_out,
-                    char *scotty_id_out, size_t id_len, int *http_status, char *err, size_t errlen) {
-    if (http_status) *http_status = 0;
-    if (offset_out) *offset_out = 0;
-    if (is_final_out) *is_final_out = 0;
-    if (scotty_id_out && id_len) scotty_id_out[0] = 0;
-    if (!s || !upload_url || !upload_url[0]) return -1;
-
-    char snap[640];
-    if (net_snapshot_jar(snap, sizeof snap) != 0) {
-        if (err && errlen) snprintf(err, errlen, "not logged in");
-        return -1;
-    }
-    char auth[512];
-    if (build_auth_header(snap, auth, sizeof auth) != 0) {
-        unlink(snap);
-        if (http_status) *http_status = 401;
-        if (err && errlen) snprintf(err, errlen, "YouTube session expired — sign in again");
-        return -1;
-    }
-
-    struct curl_slist *hdr = add_session_headers(NULL, auth, s);
-    memset(auth, 0, sizeof auth);
-    hdr = curl_slist_append(hdr, "x-goog-upload-command: query");
-
-    CURL *c = curl_easy_init();
-    if (!c) {
-        unlink(snap);
-        curl_slist_free_all(hdr);
-        return -1;
-    }
-
-    scotty_hdrs sh;
-    memset(&sh, 0, sizeof sh);
-    sbuf resp;
-    sb_init(&resp);
-
-    net_apply(c);
-    curl_easy_setopt(c, CURLOPT_URL, upload_url);
-    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
-    curl_easy_setopt(c, CURLOPT_COOKIEFILE, snap);
-    curl_easy_setopt(c, CURLOPT_POST, 1L);
-    curl_easy_setopt(c, CURLOPT_POSTFIELDS, "");
-    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, 0L);
-    curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
-    curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, capture_scotty_headers);
-    curl_easy_setopt(c, CURLOPT_HEADERDATA, &sh);
-    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_sbuf);
-    curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
-
-    CURLcode rc = curl_easy_perform(c);
-    long status = 0;
-    if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
-    else if (err && errlen) snprintf(err, errlen, "%s", curl_easy_strerror(rc));
-
-    curl_slist_free_all(hdr);
-    curl_easy_cleanup(c);
-    unlink(snap);
-
-    if (http_status) *http_status = (int)status;
-    if (rc != CURLE_OK) {
-        sb_free(&resp);
-        return -1;
-    }
-    if (status == 401 || status == 403) {
-        if (err && errlen) snprintf(err, errlen, "YouTube session expired — sign in again");
-        sb_free(&resp);
-        return -1;
-    }
-    if (status != 200 && status != 201) {
-        if (err && errlen) snprintf(err, errlen, "Scotty status query failed (HTTP %ld)", status);
-        sb_free(&resp);
-        return -1;
-    }
-
-    int is_final = !strcasecmp(sh.status, "final");
-    if (is_final_out) *is_final_out = is_final;
-    if (offset_out && sh.has_size_received && sh.size_received >= 0) *offset_out = sh.size_received;
-    if (is_final && scotty_id_out && id_len && resp.data) parse_scotty_id(resp.data, scotty_id_out, id_len);
-
-    sb_free(&resp);
-    return 0;
 }
 
 typedef struct {
@@ -511,64 +119,47 @@ static size_t read_chunk_cb(char *ptr, size_t size, size_t nitems, void *ud) {
     return got;
 }
 
-int yt_scotty_upload_chunk(const yt_session *s, const char *upload_url, FILE *fp, int64_t offset, int64_t chunk_len,
-                           int is_final, yt_progress_fn cb, void *ud, volatile int *stop_flag,
-                           char *scotty_id_out, size_t id_len, int *http_status, char *err, size_t errlen) {
-    if (http_status) *http_status = 0;
-    if (scotty_id_out && id_len) scotty_id_out[0] = 0;
-    if (!s || !upload_url || !fp || offset < 0 || chunk_len < 0) return -1;
+int yt_oauth_start_device(yt_device_flow *out, char *err, size_t errlen) {
+    ensure_urls();
+    if (!out) return -1;
+    memset(out, 0, sizeof *out);
 
-    if (chunk_len > 0 && fseeko(fp, (off_t)offset, SEEK_SET) != 0) {
-        if (err && errlen) snprintf(err, errlen, "cannot seek capture file");
+    yt_oauth o;
+    if (net_oauth_get(&o) != 0 || !o.client_id[0] || !o.client_secret[0]) {
+        memset(&o, 0, sizeof o);
+        if (err && errlen) snprintf(err, errlen, "OAuth Client ID is not configured");
         return -1;
     }
 
-    char snap[640];
-    if (net_snapshot_jar(snap, sizeof snap) != 0) {
-        if (err && errlen) snprintf(err, errlen, "not logged in");
-        return -1;
-    }
-    char auth[512];
-    if (build_auth_header(snap, auth, sizeof auth) != 0) {
-        unlink(snap);
-        if (http_status) *http_status = 401;
-        if (err && errlen) snprintf(err, errlen, "YouTube session expired — sign in again");
-        return -1;
-    }
+    char ecid[1024], escope[256], url[640];
+    url_encode(o.client_id, ecid, sizeof ecid);
+    url_encode(YT_SCOPE, escope, sizeof escope);
+    memset(&o, 0, sizeof o);
+    snprintf(url, sizeof url, "%s/device/code", g_oauth_base);
 
-    char off_hdr[64];
-    snprintf(off_hdr, sizeof off_hdr, "x-goog-upload-offset: %lld", (long long)offset);
-    struct curl_slist *hdr = add_session_headers(NULL, auth, s);
-    memset(auth, 0, sizeof auth);
-    hdr = curl_slist_append(hdr, is_final ? "x-goog-upload-command: upload, finalize" : "x-goog-upload-command: upload");
-    hdr = curl_slist_append(hdr, off_hdr);
-    hdr = curl_slist_append(hdr, "Content-Type: application/octet-stream");
+    sbuf form, resp;
+    sb_init(&form);
+    sb_init(&resp);
+    sb_printf(&form, "client_id=%s&scope=%s", ecid, escope);
 
     CURL *c = curl_easy_init();
     if (!c) {
-        unlink(snap);
-        curl_slist_free_all(hdr);
+        sb_free(&form);
+        sb_free(&resp);
+        if (err && errlen) snprintf(err, errlen, "curl init failed");
         return -1;
     }
 
-    chunk_read_ctx ctx = {fp, chunk_len, cb, ud, stop_flag};
-    sbuf resp;
-    sb_init(&resp);
+    struct curl_slist *hdr = curl_slist_append(NULL, "Content-Type: application/x-www-form-urlencoded");
+    hdr = curl_slist_append(hdr, "Expect:");
 
     net_apply(c);
-    curl_easy_setopt(c, CURLOPT_URL, upload_url);
+    curl_easy_setopt(c, CURLOPT_URL, url);
     curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
-    curl_easy_setopt(c, CURLOPT_COOKIEFILE, snap);
     curl_easy_setopt(c, CURLOPT_POST, 1L);
-    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)chunk_len);
-    if (chunk_len > 0) {
-        curl_easy_setopt(c, CURLOPT_READFUNCTION, read_chunk_cb);
-        curl_easy_setopt(c, CURLOPT_READDATA, &ctx);
-    } else {
-        curl_easy_setopt(c, CURLOPT_POSTFIELDS, "");
-    }
-    curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1024L);
-    curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 45L);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDS, form.data);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)form.len);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_sbuf);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
 
@@ -579,93 +170,106 @@ int yt_scotty_upload_chunk(const yt_session *s, const char *upload_url, FILE *fp
 
     curl_slist_free_all(hdr);
     curl_easy_cleanup(c);
-    unlink(snap);
+    sb_free(&form);
 
-    if (http_status) *http_status = (int)status;
     if (rc != CURLE_OK) {
         sb_free(&resp);
         return -1;
     }
-    if (status == 401 || status == 403) {
-        if (err && errlen) snprintf(err, errlen, "YouTube session expired — sign in again");
-        sb_free(&resp);
-        return -1;
-    }
-    if (status != 200 && status != 201) {
-        if (err && errlen) snprintf(err, errlen, "Scotty upload failed (HTTP %ld)", status);
-        sb_free(&resp);
-        return -1;
-    }
-    if (is_final) {
-        if (!resp.data || parse_scotty_id(resp.data, scotty_id_out, id_len) != 0) {
-            if (err && errlen) snprintf(err, errlen, "missing scottyResourceId from YouTube response");
-            sb_free(&resp);
-            return -1;
+
+    if (status != 200 || !resp.data) {
+        char ecode[64] = "", edesc[200] = "";
+        extract_oauth_err(resp.data, ecode, sizeof ecode, edesc, sizeof edesc);
+        if (err && errlen) {
+            if (edesc[0]) snprintf(err, errlen, "%s (make sure OAuth client type is TVs and Limited Input devices)", edesc);
+            else if (ecode[0]) snprintf(err, errlen, "Google OAuth error: %s (use TVs and Limited Input devices client type)", ecode);
+            else snprintf(err, errlen, "Google device code request failed (HTTP %ld)", status);
         }
+        sb_free(&resp);
+        return -1;
     }
+
+    const char *v_dc = json_find(resp.data, "device_code");
+    const char *v_uc = json_find(resp.data, "user_code");
+    const char *v_vu = json_find(resp.data, "verification_url");
+    if (!v_vu) v_vu = json_find(resp.data, "verification_uri");
+    const char *v_exp = json_find(resp.data, "expires_in");
+    const char *v_int = json_find(resp.data, "interval");
+
+    if (v_dc) json_string(v_dc, out->device_code, sizeof out->device_code);
+    if (v_uc) json_string(v_uc, out->user_code, sizeof out->user_code);
+    if (v_vu) json_string(v_vu, out->verification_url, sizeof out->verification_url);
+    out->expires_in = (int)json_int(v_exp, 1800);
+    out->interval_s = (int)json_int(v_int, 5);
+    if (out->interval_s < 1) out->interval_s = 1;
+    if (out->expires_in < 30) out->expires_in = 1800;
+    out->expires_at_ms = plat_now_ms() + (int64_t)out->expires_in * 1000;
+
+    if (resp.data) memset(resp.data, 0, resp.len);
     sb_free(&resp);
+
+    if (!out->device_code[0] || !out->user_code[0] || !out->verification_url[0]) {
+        memset(out, 0, sizeof *out);
+        if (err && errlen) snprintf(err, errlen, "incomplete device code response from Google");
+        return -1;
+    }
     return 0;
 }
 
-static void sb_append_context(sbuf *b, const yt_session *s) {
-    sb_puts(b, "\"context\":{\"client\":{\"clientName\":\"WEB_CREATOR\",\"clientVersion\":");
-    sb_json_str(b, s->client_version[0] ? s->client_version : DEFAULT_CLIENT_VER);
-    sb_puts(b, ",\"hl\":\"en\",\"gl\":\"US\"}");
-    if (s->delegated_session_id[0]) {
-        sb_puts(b, ",\"user\":{\"onBehalfOfUser\":");
-        sb_json_str(b, s->delegated_session_id);
-        sb_puts(b, "}");
-    }
-    sb_puts(b, "}");
-}
-
-static int innertube_post(const yt_session *s, const char *endpoint, const char *json_body, size_t body_len,
-                          sbuf *resp_out, int *http_status, char *err, size_t errlen) {
+int yt_oauth_poll_device(yt_device_flow *flow, char *state_out, size_t state_len,
+                         char *err, size_t errlen) {
     ensure_urls();
-    if (http_status) *http_status = 0;
-    if (!s->api_key[0]) {
-        if (http_status) *http_status = 401;
-        if (err && errlen) snprintf(err, errlen, "missing YouTube Studio API key");
-        return -1;
-    }
-    char snap[640];
-    if (net_snapshot_jar(snap, sizeof snap) != 0) {
-        if (err && errlen) snprintf(err, errlen, "not logged in");
-        return -1;
-    }
-    char auth[512];
-    if (build_auth_header(snap, auth, sizeof auth) != 0) {
-        unlink(snap);
-        if (http_status) *http_status = 401;
-        if (err && errlen) snprintf(err, errlen, "YouTube session expired — sign in again");
+    if (state_out && state_len) snprintf(state_out, state_len, "error");
+    if (!flow || !flow->device_code[0]) {
+        if (err && errlen) snprintf(err, errlen, "no active device sign-in code");
         return -1;
     }
 
-    char ekey[256], url[1024];
-    url_encode(s->api_key, ekey, sizeof ekey);
-    snprintf(url, sizeof url, "%s/%s?key=%s&alt=json", g_innertube_base, endpoint, ekey);
+    yt_oauth o;
+    if (net_oauth_get(&o) != 0 || !o.client_id[0] || !o.client_secret[0]) {
+        memset(&o, 0, sizeof o);
+        if (err && errlen) snprintf(err, errlen, "OAuth Client ID is not configured");
+        return -1;
+    }
 
-    struct curl_slist *hdr = add_session_headers(NULL, auth, s);
-    memset(auth, 0, sizeof auth);
-    hdr = curl_slist_append(hdr, "Content-Type: application/json");
+    char ecid[1024], esec[1024], edev[2048], url[640];
+    url_encode(o.client_id, ecid, sizeof ecid);
+    url_encode(o.client_secret, esec, sizeof esec);
+    url_encode(flow->device_code, edev, sizeof edev);
+    snprintf(url, sizeof url, "%s/token", g_oauth_base);
+
+    sbuf form, resp;
+    sb_init(&form);
+    sb_init(&resp);
+    sb_printf(&form,
+              "grant_type=urn%%3Aietf%%3Aparams%%3Aoauth%%3Agrant-type%%3Adevice_code"
+              "&client_id=%s&client_secret=%s&device_code=%s",
+              ecid, esec, edev);
+    memset(esec, 0, sizeof esec);
+    memset(edev, 0, sizeof edev);
 
     CURL *c = curl_easy_init();
     if (!c) {
-        unlink(snap);
-        curl_slist_free_all(hdr);
+        memset(&o, 0, sizeof o);
+        if (form.data) memset(form.data, 0, form.len);
+        sb_free(&form);
+        sb_free(&resp);
+        if (err && errlen) snprintf(err, errlen, "curl init failed");
         return -1;
     }
+
+    struct curl_slist *hdr = curl_slist_append(NULL, "Content-Type: application/x-www-form-urlencoded");
+    hdr = curl_slist_append(hdr, "Expect:");
 
     net_apply(c);
     curl_easy_setopt(c, CURLOPT_URL, url);
     curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
-    curl_easy_setopt(c, CURLOPT_COOKIEFILE, snap);
     curl_easy_setopt(c, CURLOPT_POST, 1L);
-    curl_easy_setopt(c, CURLOPT_POSTFIELDS, json_body);
-    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)body_len);
-    curl_easy_setopt(c, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDS, form.data);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)form.len);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_sbuf);
-    curl_easy_setopt(c, CURLOPT_WRITEDATA, resp_out);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
 
     CURLcode rc = curl_easy_perform(c);
     long status = 0;
@@ -674,86 +278,625 @@ static int innertube_post(const yt_session *s, const char *endpoint, const char 
 
     curl_slist_free_all(hdr);
     curl_easy_cleanup(c);
-    unlink(snap);
+    if (form.data) memset(form.data, 0, form.len);
+    sb_free(&form);
 
+    if (rc != CURLE_OK) {
+        memset(&o, 0, sizeof o);
+        sb_free(&resp);
+        return -1;
+    }
+
+    if (status == 200 && resp.data) {
+        char access_token[2048] = "";
+        char refresh_token[512] = "";
+        const char *v_at = json_find(resp.data, "access_token");
+        const char *v_rt = json_find(resp.data, "refresh_token");
+        int exp = (int)json_int(json_find(resp.data, "expires_in"), 3600);
+        if (v_at) json_string(v_at, access_token, sizeof access_token);
+        if (v_rt) json_string(v_rt, refresh_token, sizeof refresh_token);
+        memset(resp.data, 0, resp.len);
+        sb_free(&resp);
+
+        if (!access_token[0] || !refresh_token[0]) {
+            memset(access_token, 0, sizeof access_token);
+            memset(refresh_token, 0, sizeof refresh_token);
+            memset(&o, 0, sizeof o);
+            if (err && errlen) snprintf(err, errlen, "Google did not return an OAuth refresh token — revoke app access and retry");
+            return -1;
+        }
+
+        int ch_http = 0;
+        char cid[64] = "", cname[160] = "";
+        if (yt_fetch_channel(access_token, cid, sizeof cid, cname, sizeof cname, &ch_http, err, errlen) != 0) {
+            memset(access_token, 0, sizeof access_token);
+            memset(refresh_token, 0, sizeof refresh_token);
+            memset(&o, 0, sizeof o);
+            return -1;
+        }
+
+        snprintf(o.refresh_token, sizeof o.refresh_token, "%s", refresh_token);
+        snprintf(o.channel_id, sizeof o.channel_id, "%s", cid);
+        snprintf(o.channel_name, sizeof o.channel_name, "%s", cname);
+        int save_rc = net_oauth_set(&o);
+        memset(&o, 0, sizeof o);
+        memset(refresh_token, 0, sizeof refresh_token);
+
+        if (save_rc != 0) {
+            memset(access_token, 0, sizeof access_token);
+            if (err && errlen) snprintf(err, errlen, "could not save OAuth credentials on console");
+            return -1;
+        }
+        net_token_cache_set(access_token, exp);
+        memset(access_token, 0, sizeof access_token);
+
+        if (state_out && state_len) snprintf(state_out, state_len, "done");
+        return 1;
+    }
+
+    char ecode[64] = "", edesc[200] = "";
+    extract_oauth_err(resp.data, ecode, sizeof ecode, edesc, sizeof edesc);
+    if (resp.data) memset(resp.data, 0, resp.len);
+    sb_free(&resp);
+    memset(&o, 0, sizeof o);
+
+    if (!strcmp(ecode, "authorization_pending")) {
+        if (state_out && state_len) snprintf(state_out, state_len, "pending");
+        return 0;
+    }
+    if (!strcmp(ecode, "slow_down")) {
+        flow->interval_s += 5;
+        if (state_out && state_len) snprintf(state_out, state_len, "slow_down");
+        return 0;
+    }
+    if (!strcmp(ecode, "access_denied")) {
+        if (state_out && state_len) snprintf(state_out, state_len, "denied");
+        if (err && errlen) snprintf(err, errlen, "Sign-in was cancelled on Google");
+        return -1;
+    }
+    if (!strcmp(ecode, "expired_token")) {
+        if (state_out && state_len) snprintf(state_out, state_len, "expired");
+        if (err && errlen) snprintf(err, errlen, "Sign-in code expired — click New code");
+        return -1;
+    }
+
+    if (state_out && state_len) snprintf(state_out, state_len, "error");
+    if (err && errlen) {
+        if (edesc[0]) snprintf(err, errlen, "%s", edesc);
+        else if (ecode[0]) snprintf(err, errlen, "OAuth error: %s", ecode);
+        else snprintf(err, errlen, "OAuth token check failed (HTTP %ld)", status);
+    }
+    return -1;
+}
+
+int yt_oauth_refresh(char *token_out, size_t tok_len, int *invalid_grant_out,
+                     char *err, size_t errlen) {
+    ensure_urls();
+    if (invalid_grant_out) *invalid_grant_out = 0;
+    if (token_out && tok_len) token_out[0] = 0;
+
+    yt_oauth o;
+    if (net_oauth_get(&o) != 0 || !o.client_id[0] || !o.client_secret[0] || !o.refresh_token[0]) {
+        memset(&o, 0, sizeof o);
+        if (err && errlen) snprintf(err, errlen, "not signed in — scan QR to sign in to YouTube");
+        return -1;
+    }
+
+    char ecid[1024], esec[1024], eref[2048], url[640];
+    url_encode(o.client_id, ecid, sizeof ecid);
+    url_encode(o.client_secret, esec, sizeof esec);
+    url_encode(o.refresh_token, eref, sizeof eref);
+    snprintf(url, sizeof url, "%s/token", g_oauth_base);
+
+    sbuf form, resp;
+    sb_init(&form);
+    sb_init(&resp);
+    sb_printf(&form, "grant_type=refresh_token&client_id=%s&client_secret=%s&refresh_token=%s",
+              ecid, esec, eref);
+    memset(esec, 0, sizeof esec);
+    memset(eref, 0, sizeof eref);
+
+    CURL *c = curl_easy_init();
+    if (!c) {
+        memset(&o, 0, sizeof o);
+        if (form.data) memset(form.data, 0, form.len);
+        sb_free(&form);
+        sb_free(&resp);
+        if (err && errlen) snprintf(err, errlen, "curl init failed");
+        return -1;
+    }
+
+    struct curl_slist *hdr = curl_slist_append(NULL, "Content-Type: application/x-www-form-urlencoded");
+    hdr = curl_slist_append(hdr, "Expect:");
+
+    net_apply(c);
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
+    curl_easy_setopt(c, CURLOPT_POST, 1L);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDS, form.data);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)form.len);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_sbuf);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
+
+    CURLcode rc = curl_easy_perform(c);
+    long status = 0;
+    if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
+    else if (err && errlen) snprintf(err, errlen, "%s", curl_easy_strerror(rc));
+
+    curl_slist_free_all(hdr);
+    curl_easy_cleanup(c);
+    if (form.data) memset(form.data, 0, form.len);
+    sb_free(&form);
+
+    if (rc != CURLE_OK) {
+        memset(&o, 0, sizeof o);
+        sb_free(&resp);
+        return -1;
+    }
+
+    if (status == 200 && resp.data) {
+        char access_token[2048] = "";
+        char rotated_rt[512] = "";
+        const char *v_at = json_find(resp.data, "access_token");
+        const char *v_rt = json_find(resp.data, "refresh_token");
+        int exp = (int)json_int(json_find(resp.data, "expires_in"), 3600);
+        if (v_at) json_string(v_at, access_token, sizeof access_token);
+        if (v_rt) json_string(v_rt, rotated_rt, sizeof rotated_rt);
+        memset(resp.data, 0, resp.len);
+        sb_free(&resp);
+
+        if (!access_token[0]) {
+            memset(&o, 0, sizeof o);
+            memset(rotated_rt, 0, sizeof rotated_rt);
+            if (err && errlen) snprintf(err, errlen, "token refresh returned empty access_token");
+            return -1;
+        }
+        if (rotated_rt[0] && strcmp(rotated_rt, o.refresh_token) != 0) {
+            snprintf(o.refresh_token, sizeof o.refresh_token, "%s", rotated_rt);
+            net_oauth_set(&o);
+        }
+        memset(rotated_rt, 0, sizeof rotated_rt);
+        memset(&o, 0, sizeof o);
+
+        net_token_cache_set(access_token, exp);
+        if (token_out && tok_len) snprintf(token_out, tok_len, "%s", access_token);
+        memset(access_token, 0, sizeof access_token);
+        return 0;
+    }
+
+    char ecode[64] = "", edesc[200] = "";
+    extract_oauth_err(resp.data, ecode, sizeof ecode, edesc, sizeof edesc);
+    if (resp.data) memset(resp.data, 0, resp.len);
+    sb_free(&resp);
+    memset(&o, 0, sizeof o);
+
+    if ((status == 400 || status == 401) && !strcmp(ecode, "invalid_grant")) {
+        if (invalid_grant_out) *invalid_grant_out = 1;
+        net_oauth_clear_tokens();
+        if (err && errlen) snprintf(err, errlen, "YouTube sign-in expired — scan QR to sign in again");
+        return -1;
+    }
+    if (err && errlen) {
+        if (edesc[0]) snprintf(err, errlen, "%s", edesc);
+        else if (ecode[0]) snprintf(err, errlen, "token refresh failed: %s", ecode);
+        else snprintf(err, errlen, "token refresh failed (HTTP %ld)", status);
+    }
+    return -1;
+}
+
+int yt_fetch_channel(const char *access_token, char *cid_out, size_t cid_len,
+                     char *cname_out, size_t cname_len, int *http_status,
+                     char *err, size_t errlen) {
+    ensure_urls();
+    if (http_status) *http_status = 0;
+    if (cid_out && cid_len) cid_out[0] = 0;
+    if (cname_out && cname_len) cname_out[0] = 0;
+    if (!access_token || !access_token[0]) {
+        if (http_status) *http_status = 401;
+        if (err && errlen) snprintf(err, errlen, "missing access token");
+        return -1;
+    }
+
+    char url[640];
+    snprintf(url, sizeof url, "%s/channels?part=snippet&mine=true", g_api_base);
+
+    CURL *c = curl_easy_init();
+    if (!c) {
+        if (err && errlen) snprintf(err, errlen, "curl init failed");
+        return -1;
+    }
+
+    struct curl_slist *hdr = append_bearer(NULL, access_token);
+    sbuf resp;
+    sb_init(&resp);
+
+    net_apply(c);
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_sbuf);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
+
+    CURLcode rc = curl_easy_perform(c);
+    long status = 0;
+    if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
+    else if (err && errlen) snprintf(err, errlen, "%s", curl_easy_strerror(rc));
+
+    curl_slist_free_all(hdr);
+    curl_easy_cleanup(c);
     if (http_status) *http_status = (int)status;
-    if (rc != CURLE_OK) return -1;
-    if (status == 401 || status == 403) {
-        if (err && errlen) snprintf(err, errlen, "YouTube session expired — sign in again");
+
+    if (rc != CURLE_OK) {
+        sb_free(&resp);
         return -1;
     }
-    if (status != 200 && status != 201) {
-        if (err && errlen) snprintf(err, errlen, "YouTube %s failed (HTTP %ld)", endpoint, status);
+    if (status != 200 || !resp.data) {
+        if (err && errlen) {
+            if (status == 401) snprintf(err, errlen, "YouTube access token rejected (HTTP 401)");
+            else if (status == 403) snprintf(err, errlen, "YouTube Data API v3 access denied (ensure YouTube Data API v3 is enabled)");
+            else snprintf(err, errlen, "YouTube channel lookup failed (HTTP %ld)", status);
+        }
+        sb_free(&resp);
         return -1;
     }
+
+    const char *items = json_find(resp.data, "items");
+    const char *first = json_array_first(items);
+    if (!first) {
+        sb_free(&resp);
+        if (err && errlen) snprintf(err, errlen, "No YouTube channel found on this Google account — create a channel in YouTube Studio first");
+        return -1;
+    }
+
+    const char *idv = json_find(first, "id");
+    const char *snip = json_find(first, "snippet");
+    const char *titlev = json_find(snip, "title");
+    if (idv && cid_out && cid_len) json_string(idv, cid_out, cid_len);
+    if (titlev && cname_out && cname_len) json_string(titlev, cname_out, cname_len);
+    sb_free(&resp);
+
+    if (cid_out && cid_len && !cid_out[0]) {
+        if (err && errlen) snprintf(err, errlen, "missing channel ID in YouTube response");
+        return -1;
+    }
+    if (cname_out && cname_len && !cname_out[0]) snprintf(cname_out, cname_len, "YouTube Channel");
     return 0;
 }
 
-int yt_create_video(const yt_session *s, const char *frontend_id, const char *scotty_id, const yt_video_meta *meta,
-                    char *video_id_out, size_t vid_len, int *http_status, char *err, size_t errlen) {
-    if (!s || !scotty_id || !scotty_id[0] || !meta || !video_id_out || !vid_len) return -1;
-    video_id_out[0] = 0;
-
-    const char *priv = meta->privacy[0] ? meta->privacy : "UNLISTED";
-    const char *title = meta->title[0] ? meta->title : "PS5 Gameplay Capture";
-
-    sbuf req, resp;
-    sb_init(&req);
-    sb_init(&resp);
-    sb_puts(&req, "{");
-    sb_append_context(&req, s);
-    sb_puts(&req, ",\"channelId\":");
-    sb_json_str(&req, s->channel_id);
-    sb_puts(&req, ",\"resourceId\":{\"scottyResourceId\":{\"id\":");
-    sb_json_str(&req, scotty_id);
-    sb_puts(&req, "}}");
-    if (frontend_id && frontend_id[0]) {
-        sb_puts(&req, ",\"frontendUploadId\":");
-        sb_json_str(&req, frontend_id);
-    }
-    sb_puts(&req, ",\"initialMetadata\":{\"title\":{\"newTitle\":");
-    sb_json_str(&req, title);
-    sb_puts(&req, "},\"description\":{\"newDescription\":");
-    sb_json_str(&req, meta->description);
-    sb_puts(&req, "},\"privacy\":{\"newPrivacy\":");
-    sb_json_str(&req, priv);
-    sb_puts(&req, "},\"draftState\":{\"isDraft\":false}}}");
-
-    int rc = innertube_post(s, "upload/createvideo", req.data, req.len, &resp, http_status, err, errlen);
-    sb_free(&req);
-    if (rc == 0) {
-        if (!resp.data || extract_embedded_json_str(resp.data, "videoId", video_id_out, vid_len) != 0) {
-            if (err && errlen) snprintf(err, errlen, "missing videoId in createvideo response");
-            rc = -1;
-        }
-    }
-    sb_free(&resp);
-    return rc;
+static const char *lowercase_privacy(const char *p) {
+    if (p && !strcasecmp(p, "PUBLIC")) return "public";
+    if (p && !strcasecmp(p, "PRIVATE")) return "private";
+    return "unlisted";
 }
 
-int yt_update_metadata(const yt_session *s, const char *video_id, const yt_video_meta *meta,
-                       int *http_status, char *err, size_t errlen) {
-    if (!s || !video_id || !video_id[0] || !meta) return -1;
+int yt_upload_init(const char *access_token, const yt_video_meta *meta, const char *mime_type,
+                   int64_t file_size, char *upload_url_out, size_t url_len,
+                   int *http_status, int *quota_exceeded_out, char *err, size_t errlen) {
+    ensure_urls();
+    if (http_status) *http_status = 0;
+    if (quota_exceeded_out) *quota_exceeded_out = 0;
+    if (upload_url_out && url_len) upload_url_out[0] = 0;
+    if (!access_token || !access_token[0] || !meta || !upload_url_out || !url_len) return -1;
 
-    sbuf req, resp;
-    sb_init(&req);
+    char url[640];
+    snprintf(url, sizeof url, "%s/videos?uploadType=resumable&part=snippet,status,paidProductPlacementDetails",
+             g_upload_base);
+
+    const char *title = meta->title[0] ? meta->title : "PS5 Gameplay Capture";
+    const char *priv = lowercase_privacy(meta->privacy);
+    const char *mime = (mime_type && mime_type[0]) ? mime_type : "video/mp4";
+
+    sbuf jbody, resp;
+    sb_init(&jbody);
     sb_init(&resp);
-    sb_puts(&req, "{");
-    sb_append_context(&req, s);
-    sb_puts(&req, ",\"encryptedVideoId\":");
-    sb_json_str(&req, video_id);
-    sb_puts(&req, ",\"madeForKids\":{\"operation\":\"MDE_MADE_FOR_KIDS_UPDATE_OPERATION_SET\",\"newMfk\":");
-    sb_puts(&req, meta->made_for_kids ? "\"MDE_MADE_FOR_KIDS_TYPE_MFK\"" : "\"MDE_MADE_FOR_KIDS_TYPE_NOT_MFK\"");
-    sb_puts(&req, "}");
-    if (!meta->made_for_kids && meta->playlist_id[0]) {
-        sb_puts(&req, ",\"addToPlaylist\":{\"addToPlaylistIds\":[");
-        sb_json_str(&req, meta->playlist_id);
-        sb_puts(&req, "]}");
-    }
-    sb_puts(&req, "}");
+    sb_puts(&jbody, "{\"snippet\":{\"title\":");
+    sb_json_str(&jbody, title);
+    sb_puts(&jbody, ",\"description\":");
+    sb_json_str(&jbody, meta->description);
+    sb_puts(&jbody, ",\"categoryId\":\"20\"},\"status\":{\"privacyStatus\":");
+    sb_json_str(&jbody, priv);
+    sb_printf(&jbody,
+              ",\"selfDeclaredMadeForKids\":%s},"
+              "\"paidProductPlacementDetails\":{\"hasPaidProductPlacement\":false}}",
+              meta->made_for_kids ? "true" : "false");
 
-    int rc = innertube_post(s, "video_manager/metadata_update", req.data, req.len, &resp, http_status, err, errlen);
-    sb_free(&req);
+    char ct_hdr[96], len_hdr[96];
+    snprintf(ct_hdr, sizeof ct_hdr, "X-Upload-Content-Type: %s", mime);
+    snprintf(len_hdr, sizeof len_hdr, "X-Upload-Content-Length: %lld", (long long)file_size);
+
+    struct curl_slist *hdr = append_bearer(NULL, access_token);
+    hdr = curl_slist_append(hdr, "Content-Type: application/json; charset=UTF-8");
+    hdr = curl_slist_append(hdr, ct_hdr);
+    hdr = curl_slist_append(hdr, len_hdr);
+
+    CURL *c = curl_easy_init();
+    if (!c) {
+        curl_slist_free_all(hdr);
+        sb_free(&jbody);
+        sb_free(&resp);
+        return -1;
+    }
+
+    upload_hdrs uh;
+    memset(&uh, 0, sizeof uh);
+
+    net_apply(c);
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
+    curl_easy_setopt(c, CURLOPT_POST, 1L);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDS, jbody.data);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)jbody.len);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, capture_upload_headers);
+    curl_easy_setopt(c, CURLOPT_HEADERDATA, &uh);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_sbuf);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
+
+    CURLcode rc = curl_easy_perform(c);
+    long status = 0;
+    if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
+    else if (err && errlen) snprintf(err, errlen, "%s", curl_easy_strerror(rc));
+
+    curl_slist_free_all(hdr);
+    curl_easy_cleanup(c);
+    sb_free(&jbody);
+    if (http_status) *http_status = (int)status;
+
+    if (rc != CURLE_OK) {
+        sb_free(&resp);
+        return -1;
+    }
+    if (status == 403 && response_has_quota_err(resp.data)) {
+        if (quota_exceeded_out) *quota_exceeded_out = 1;
+        if (err && errlen) snprintf(err, errlen, "YouTube API daily upload quota reached — resets at midnight Pacific Time");
+        sb_free(&resp);
+        return -1;
+    }
     sb_free(&resp);
-    return rc;
+    if (status == 401) {
+        if (err && errlen) snprintf(err, errlen, "YouTube access token expired (HTTP 401)");
+        return -1;
+    }
+    if ((status != 200 && status != 201) || !uh.location[0]) {
+        if (err && errlen) snprintf(err, errlen, "YouTube upload init failed (HTTP %ld)", status);
+        return -1;
+    }
+    if (strlen(uh.location) >= url_len) {
+        if (err && errlen) snprintf(err, errlen, "YouTube resumable upload URL too long");
+        return -1;
+    }
+    snprintf(upload_url_out, url_len, "%s", uh.location);
+    return 0;
+}
+
+int yt_upload_query(const char *access_token, const char *upload_url, int64_t file_size,
+                    int64_t *offset_out, int *is_final_out, char *video_id_out, size_t vid_len,
+                    int *http_status, char *err, size_t errlen) {
+    if (http_status) *http_status = 0;
+    if (offset_out) *offset_out = 0;
+    if (is_final_out) *is_final_out = 0;
+    if (video_id_out && vid_len) video_id_out[0] = 0;
+    if (!access_token || !access_token[0] || !upload_url || !upload_url[0]) return -1;
+
+    char range_hdr[96];
+    snprintf(range_hdr, sizeof range_hdr, "Content-Range: bytes */%lld", (long long)file_size);
+
+    struct curl_slist *hdr = append_bearer(NULL, access_token);
+    hdr = curl_slist_append(hdr, range_hdr);
+
+    CURL *c = curl_easy_init();
+    if (!c) {
+        curl_slist_free_all(hdr);
+        return -1;
+    }
+
+    upload_hdrs uh;
+    memset(&uh, 0, sizeof uh);
+    sbuf resp;
+    sb_init(&resp);
+
+    net_apply(c);
+    curl_easy_setopt(c, CURLOPT_URL, upload_url);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
+    curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, "PUT");
+    curl_easy_setopt(c, CURLOPT_POSTFIELDS, "");
+    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, 0L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, capture_upload_headers);
+    curl_easy_setopt(c, CURLOPT_HEADERDATA, &uh);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_sbuf);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
+
+    CURLcode rc = curl_easy_perform(c);
+    long status = 0;
+    if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
+    else if (err && errlen) snprintf(err, errlen, "%s", curl_easy_strerror(rc));
+
+    curl_slist_free_all(hdr);
+    curl_easy_cleanup(c);
+    if (http_status) *http_status = (int)status;
+
+    if (rc != CURLE_OK) {
+        sb_free(&resp);
+        return -1;
+    }
+    if (status == 308) {
+        if (is_final_out) *is_final_out = 0;
+        if (offset_out) *offset_out = uh.has_range ? (uh.range_end + 1) : 0;
+        sb_free(&resp);
+        return 0;
+    }
+    if (status == 200 || status == 201) {
+        if (is_final_out) *is_final_out = 1;
+        if (offset_out) *offset_out = file_size;
+        if (video_id_out && vid_len && resp.data) {
+            const char *idv = json_find(resp.data, "id");
+            if (idv) json_string(idv, video_id_out, vid_len);
+        }
+        sb_free(&resp);
+        return 0;
+    }
+
+    sb_free(&resp);
+    if (err && errlen) snprintf(err, errlen, "YouTube upload status query failed (HTTP %ld)", status);
+    return -1;
+}
+
+int yt_upload_chunk(const char *access_token, const char *upload_url, FILE *fp,
+                    const char *mime_type, int64_t offset, int64_t chunk_len, int64_t file_size,
+                    yt_progress_fn cb, void *ud, volatile int *stop_flag,
+                    int64_t *acked_offset_out, char *video_id_out, size_t vid_len,
+                    int *http_status, int *quota_exceeded_out, char *err, size_t errlen) {
+    if (http_status) *http_status = 0;
+    if (quota_exceeded_out) *quota_exceeded_out = 0;
+    if (acked_offset_out) *acked_offset_out = offset;
+    if (video_id_out && vid_len) video_id_out[0] = 0;
+    if (!access_token || !access_token[0] || !upload_url || !fp || offset < 0 || chunk_len <= 0 || file_size <= 0)
+        return -1;
+
+    if (fseeko(fp, (off_t)offset, SEEK_SET) != 0) {
+        if (err && errlen) snprintf(err, errlen, "cannot seek capture file");
+        return -1;
+    }
+
+    const char *mime = (mime_type && mime_type[0]) ? mime_type : "video/mp4";
+    char ct_hdr[96], cr_hdr[128];
+    snprintf(ct_hdr, sizeof ct_hdr, "Content-Type: %s", mime);
+    snprintf(cr_hdr, sizeof cr_hdr, "Content-Range: bytes %lld-%lld/%lld",
+             (long long)offset, (long long)(offset + chunk_len - 1), (long long)file_size);
+
+    struct curl_slist *hdr = append_bearer(NULL, access_token);
+    hdr = curl_slist_append(hdr, ct_hdr);
+    hdr = curl_slist_append(hdr, cr_hdr);
+
+    CURL *c = curl_easy_init();
+    if (!c) {
+        curl_slist_free_all(hdr);
+        return -1;
+    }
+
+    chunk_read_ctx ctx = {fp, chunk_len, cb, ud, stop_flag};
+    upload_hdrs uh;
+    memset(&uh, 0, sizeof uh);
+    sbuf resp;
+    sb_init(&resp);
+
+    net_apply(c);
+    curl_easy_setopt(c, CURLOPT_URL, upload_url);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
+    curl_easy_setopt(c, CURLOPT_UPLOAD, 1L);
+    curl_easy_setopt(c, CURLOPT_INFILESIZE_LARGE, (curl_off_t)chunk_len);
+    curl_easy_setopt(c, CURLOPT_READFUNCTION, read_chunk_cb);
+    curl_easy_setopt(c, CURLOPT_READDATA, &ctx);
+    curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1024L);
+    curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 45L);
+    curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, capture_upload_headers);
+    curl_easy_setopt(c, CURLOPT_HEADERDATA, &uh);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_sbuf);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
+
+    CURLcode rc = curl_easy_perform(c);
+    long status = 0;
+    if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
+    else if (err && errlen) snprintf(err, errlen, "%s", curl_easy_strerror(rc));
+
+    curl_slist_free_all(hdr);
+    curl_easy_cleanup(c);
+    if (http_status) *http_status = (int)status;
+
+    if (rc != CURLE_OK) {
+        sb_free(&resp);
+        return -1;
+    }
+
+    int is_final = (offset + chunk_len >= file_size);
+    if (status == 308) {
+        if (acked_offset_out) {
+            if (is_final) *acked_offset_out = uh.has_range ? (uh.range_end + 1) : offset;
+            else *acked_offset_out = uh.has_range ? (uh.range_end + 1) : (offset + chunk_len);
+        }
+        sb_free(&resp);
+        return 0;
+    }
+    if (status == 200 || status == 201) {
+        if (video_id_out && vid_len && resp.data) {
+            const char *idv = json_find(resp.data, "id");
+            if (idv) json_string(idv, video_id_out, vid_len);
+        }
+        sb_free(&resp);
+        if (video_id_out && (!video_id_out[0])) {
+            if (err && errlen) snprintf(err, errlen, "missing video id in YouTube upload response");
+            return -1;
+        }
+        if (acked_offset_out) *acked_offset_out = file_size;
+        return 0;
+    }
+    if (status == 403 && response_has_quota_err(resp.data)) {
+        if (quota_exceeded_out) *quota_exceeded_out = 1;
+        if (err && errlen) snprintf(err, errlen, "YouTube API daily upload quota reached — resets at midnight Pacific Time");
+        sb_free(&resp);
+        return -1;
+    }
+
+    sb_free(&resp);
+    if (err && errlen) snprintf(err, errlen, "YouTube chunk upload failed (HTTP %ld)", status);
+    return -1;
+}
+
+int yt_playlist_add(const char *access_token, const char *playlist_id, const char *video_id,
+                    int *http_status, char *err, size_t errlen) {
+    ensure_urls();
+    if (http_status) *http_status = 0;
+    if (!access_token || !access_token[0] || !playlist_id || !playlist_id[0] || !video_id || !video_id[0])
+        return -1;
+
+    char url[640];
+    snprintf(url, sizeof url, "%s/playlistItems?part=snippet", g_api_base);
+
+    sbuf jbody, resp;
+    sb_init(&jbody);
+    sb_init(&resp);
+    sb_puts(&jbody, "{\"snippet\":{\"playlistId\":");
+    sb_json_str(&jbody, playlist_id);
+    sb_puts(&jbody, ",\"resourceId\":{\"kind\":\"youtube#video\",\"videoId\":");
+    sb_json_str(&jbody, video_id);
+    sb_puts(&jbody, "}}}");
+
+    struct curl_slist *hdr = append_bearer(NULL, access_token);
+    hdr = curl_slist_append(hdr, "Content-Type: application/json; charset=UTF-8");
+
+    CURL *c = curl_easy_init();
+    if (!c) {
+        curl_slist_free_all(hdr);
+        sb_free(&jbody);
+        sb_free(&resp);
+        return -1;
+    }
+
+    net_apply(c);
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
+    curl_easy_setopt(c, CURLOPT_POST, 1L);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDS, jbody.data);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)jbody.len);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_sbuf);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
+
+    CURLcode rc = curl_easy_perform(c);
+    long status = 0;
+    if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
+    else if (err && errlen) snprintf(err, errlen, "%s", curl_easy_strerror(rc));
+
+    curl_slist_free_all(hdr);
+    curl_easy_cleanup(c);
+    sb_free(&jbody);
+    sb_free(&resp);
+    if (http_status) *http_status = (int)status;
+
+    if (rc != CURLE_OK) return -1;
+    if (status == 200 || status == 201) return 0;
+    if (err && errlen) snprintf(err, errlen, "playlist add failed (HTTP %ld)", status);
+    return -1;
 }

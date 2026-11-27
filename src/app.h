@@ -11,13 +11,21 @@
 #define THREAD_STACK (1024 * 1024) // below 2 MiB: titles/payloads share the flexible pool
 
 typedef struct {
+    char client_id[256];
+    char client_secret[256];
+    char refresh_token[512];
     char channel_id[64];
     char channel_name[160];
-    char delegated_session_id[64];
-    char session_index[16];
-    char api_key[128];
-    char client_version[64];
-} yt_session;
+} yt_oauth;
+
+typedef struct {
+    char device_code[512];
+    char user_code[32];
+    char verification_url[256];
+    int interval_s;
+    int expires_in;
+    int64_t expires_at_ms;
+} yt_device_flow;
 
 typedef struct {
     char title[256];
@@ -87,42 +95,50 @@ long long json_int(const char *val, long long def);
 const char *json_array_first(const char *arr);
 const char *json_array_next(const char *elem);
 
-// ---- SHA-1 & SAPISIDHASH (sha1.c) ----
-void sha1_hex(const unsigned char *data, size_t len, char hex_out[41]);
-int sapisid_hash(const char *sapisid, const char *origin, long ts, char *out, size_t len);
-
-// ---- cookies, sessions & HTTPS setup (net.c) ----
+// ---- OAuth credentials, token cache & HTTPS setup (net.c) ----
 void net_init(void);
-const char *net_cookie_path(void);
-const char *net_session_path(void);
-int net_has_cookies(void);
-int net_normalize_cookies(const char *raw, sbuf *netscape_out, char *err, size_t errlen);
-int net_extract_cookie(const char *jar_path, const char *name, char *out, size_t len);
-int net_write_temp_jar(const char *netscape_data, char *tmp_path_out, size_t len);
-int net_commit_jar(const char *tmp_path);
-int net_snapshot_jar(char *tmp_path_out, size_t len);
-int net_session_get(yt_session *out);
-int net_session_set(const yt_session *s);
-void net_auth_clear(void);
+const char *net_oauth_path(void);
+int net_oauth_get(yt_oauth *out);
+int net_oauth_set(const yt_oauth *o);
+int net_oauth_has_client(void);
+int net_oauth_is_logged_in(void);
+void net_oauth_clear_tokens(void);
+void net_oauth_clear_all(void);
+int net_parse_client_json(const char *json, char *cid, size_t cid_len,
+                          char *csec, size_t csec_len, char *err, size_t errlen);
+int net_token_cache_get(char *out, size_t len);
+void net_token_cache_set(const char *token, int expires_in_s);
+void net_token_cache_clear(void);
 void net_apply(void *curl_handle);
 
-// ---- YouTube Studio client (youtube.c) ----
+// ---- Google OAuth Device Flow & YouTube Data API v3 (youtube.c) ----
 void yt_init(void);
-// Validates cookie jar live against Studio and bootstraps session metadata:
-// 1 = valid, 0 = refused/expired, -1 = transport/server error.
-int yt_validate_and_bootstrap(const char *jar_path, int commit_jar, yt_session *sess, char *err, size_t errlen);
-int yt_scotty_init(const yt_session *s, const char *frontend_id, int64_t file_size,
-                   char *upload_url_out, size_t url_len, int *http_status, char *err, size_t errlen);
-int yt_scotty_query(const yt_session *s, const char *upload_url, int64_t *offset_out, int *is_final_out,
-                    char *scotty_id_out, size_t id_len, int *http_status, char *err, size_t errlen);
+int yt_oauth_start_device(yt_device_flow *out, char *err, size_t errlen);
+// Returns 1 = authorized (oauth.txt saved & token cached), 0 = still waiting ("pending"/"slow_down"),
+// -1 = terminal ("denied"/"expired"/"error"). state_out always populated.
+int yt_oauth_poll_device(yt_device_flow *flow, char *state_out, size_t state_len,
+                         char *err, size_t errlen);
+// Refreshes access token using stored refresh_token; caches token & persists rotated refresh_token.
+// Sets *invalid_grant_out = 1 and clears stored tokens if Google returns invalid_grant.
+int yt_oauth_refresh(char *token_out, size_t tok_len, int *invalid_grant_out,
+                     char *err, size_t errlen);
+int yt_fetch_channel(const char *access_token, char *cid_out, size_t cid_len,
+                     char *cname_out, size_t cname_len, int *http_status,
+                     char *err, size_t errlen);
+int yt_upload_init(const char *access_token, const yt_video_meta *meta, const char *mime_type,
+                   int64_t file_size, char *upload_url_out, size_t url_len,
+                   int *http_status, int *quota_exceeded_out, char *err, size_t errlen);
+int yt_upload_query(const char *access_token, const char *upload_url, int64_t file_size,
+                    int64_t *offset_out, int *is_final_out, char *video_id_out, size_t vid_len,
+                    int *http_status, char *err, size_t errlen);
 typedef void (*yt_progress_fn)(int64_t chunk_sent, void *ud);
-int yt_scotty_upload_chunk(const yt_session *s, const char *upload_url, FILE *fp, int64_t offset, int64_t chunk_len,
-                           int is_final, yt_progress_fn cb, void *ud, volatile int *stop_flag,
-                           char *scotty_id_out, size_t id_len, int *http_status, char *err, size_t errlen);
-int yt_create_video(const yt_session *s, const char *frontend_id, const char *scotty_id, const yt_video_meta *meta,
-                    char *video_id_out, size_t vid_len, int *http_status, char *err, size_t errlen);
-int yt_update_metadata(const yt_session *s, const char *video_id, const yt_video_meta *meta,
-                       int *http_status, char *err, size_t errlen);
+int yt_upload_chunk(const char *access_token, const char *upload_url, FILE *fp,
+                    const char *mime_type, int64_t offset, int64_t chunk_len, int64_t file_size,
+                    yt_progress_fn cb, void *ud, volatile int *stop_flag,
+                    int64_t *acked_offset_out, char *video_id_out, size_t vid_len,
+                    int *http_status, int *quota_exceeded_out, char *err, size_t errlen);
+int yt_playlist_add(const char *access_token, const char *playlist_id, const char *video_id,
+                    int *http_status, char *err, size_t errlen);
 
 // ---- clips, folder browser & upload history (clips.c) ----
 void clips_init(void);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mock YouTube Studio, Scotty resumable upload, and InnerTube server for host tests.
+"""Mock Google OAuth 2.0 Device Flow & YouTube Data API v3 server for host tests.
 
     mock_youtube.py [PORT]
 """
@@ -17,27 +17,29 @@ CTRL = {
     "drop_once_after": 0,
     "rate": 0,
     "expire_next_query": 0,
-    "force_401": 0,
-    "fail_metadata": 0,
+    "force_401_once": 0,
+    "force_invalid_grant": 0,
+    "force_quota_403": 0,
+    "fail_playlist": 0,
+    "approve_device": 0,
+    "slow_down_once": 0,
+    "rotate_refresh": 0,
 }
+DEVICES = {}
 SESSIONS = {}
+CURRENT_TOKEN = "tok_1"
+NEXT_TOK = 2
 NEXT_SID = 1
 NEXT_VID = 1
+NEXT_PLI = 1
 STATS = {
-    "scotty_inits": 0,
-    "scotty_queries": 0,
-    "createvideo": [],
-    "metadata_update": [],
+    "device_starts": 0,
+    "refreshes": 0,
+    "inits": 0,
+    "queries": 0,
+    "videos": [],
+    "playlists": [],
 }
-
-
-def parse_cookies(hdr: str) -> dict:
-    out = {}
-    for part in (hdr or "").split(";"):
-        if "=" in part:
-            k, v = part.split("=", 1)
-            out[k.strip()] = v.strip()
-    return out
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -58,230 +60,290 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_empty(self, code: int, extra_headers=None):
+        self.send_response(code)
+        self.send_header("Content-Length", "0")
+        if extra_headers:
+            for k, v in extra_headers:
+                self.send_header(k, v)
+        self.end_headers()
+
+    def check_bearer(self) -> bool:
+        auth = self.headers.get("Authorization", "")
+        with LOCK:
+            if CTRL["force_401_once"] > 0:
+                CTRL["force_401_once"] -= 1
+                return False
+            want = f"Bearer {CURRENT_TOKEN}"
+        return auth == want
+
     def do_GET(self):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
 
         if u.path == "/control":
             with LOCK:
-                for k in ("drop_once_after", "rate", "expire_next_query", "force_401", "fail_metadata"):
+                for k in CTRL:
                     if k in q:
                         CTRL[k] = int(q[k])
+                if CTRL["approve_device"]:
+                    for d in DEVICES.values():
+                        d["approved"] = True
+                    CTRL["approve_device"] = 0
             return self.send_json(200, {"ok": True, "ctrl": CTRL})
 
         if u.path == "/control/stats":
             with LOCK:
                 return self.send_json(200, STATS)
 
-        if u.path.startswith("/accounts/ServiceLogin"):
-            html = b"<html><body>Sign in to Google</body></html>"
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(html)))
-            self.end_headers()
-            self.wfile.write(html)
-            return
-
-        if u.path.startswith("/studio"):
-            cookies = parse_cookies(self.headers.get("Cookie", ""))
-            sap = cookies.get("SAPISID", "")
-            if not sap.startswith("valid-"):
-                host = self.headers.get("Host", "127.0.0.1")
-                self.send_response(302)
-                self.send_header("Location", f"http://{host}/accounts/ServiceLogin")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-
-            cid = "UC_DEFAULT"
-            if "/channel/" in u.path:
-                cid = u.path.split("/channel/", 1)[1].strip("/") or "UC_DEFAULT"
-            page_id = self.headers.get("X-Goog-PageId", "")
-            sidx = q.get("authuser", self.headers.get("X-Goog-AuthUser", "0"))
-            title = "Brand Gaming" if cid == "UC_BRAND" else "PS5 Test Channel"
-            ytcfg = {
-                "INNERTUBE_API_KEY": "mock_api_key",
-                "INNERTUBE_CLIENT_VERSION": "1.20261126.00.00",
-                "CHANNEL_ID": cid,
-                "DELEGATED_SESSION_ID": page_id,
-                "SESSION_INDEX": sidx,
-                "CHANNEL_TITLE": title,
-            }
-            html = f"<!doctype html><html><script>ytcfg.set({json.dumps(ytcfg)});</script></html>".encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Set-Cookie", "YT_ROTATED=rotated-cookie-val; Path=/")
-            self.send_header("Content-Length", str(len(html)))
-            self.end_headers()
-            self.wfile.write(html)
-            return
+        if u.path == "/youtube/v3/channels":
+            if not self.check_bearer():
+                return self.send_json(401, {"error": {"code": 401, "message": "Invalid Credentials"}})
+            return self.send_json(200, {
+                "kind": "youtube#channelListResponse",
+                "items": [{"id": "UC_TEST_123", "snippet": {"title": "PS5 Test Channel"}}],
+            })
 
         self.send_json(404, {"error": "not found"})
 
     def do_POST(self):
-        global NEXT_SID, NEXT_VID
+        global NEXT_SID, NEXT_PLI, CURRENT_TOKEN, NEXT_TOK
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        clen = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(clen) if clen else b""
 
-        with LOCK:
-            if CTRL["force_401"]:
-                return self.send_json(401, {"error": "UNAUTHENTICATED"})
+        if u.path == "/oauth/device/code":
+            form = {k: v[0] for k, v in parse_qs(raw.decode("utf-8")).items()}
+            if not form.get("client_id") or form.get("scope") != "https://www.googleapis.com/auth/youtube":
+                return self.send_json(400, {"error": "invalid_request", "error_description": "bad client_id or scope"})
+            dc = f"DEV_CODE_{int(time.time() * 1000)}_{len(DEVICES) + 1}"
+            with LOCK:
+                DEVICES[dc] = {"client_id": form["client_id"], "approved": False}
+                STATS["device_starts"] += 1
+            return self.send_json(200, {
+                "device_code": dc,
+                "user_code": "ABCD-EFGH",
+                "verification_url": "https://www.google.com/device",
+                "expires_in": 1800,
+                "interval": 1,
+            })
 
-        if u.path == "/upload/studio":
-            auth = self.headers.get("Authorization", "")
-            if not auth.startswith("SAPISIDHASH ") or self.headers.get("Origin") != "https://studio.youtube.com":
-                return self.send_json(401, {"error": "bad auth or origin"})
-            if self.headers.get("x-goog-upload-command") != "start":
-                return self.send_json(400, {"error": "expected start"})
-            clen = int(self.headers.get("Content-Length", 0))
-            _ = self.rfile.read(clen) if clen else b""
-            total = int(self.headers.get("x-goog-upload-header-content-length", "0"))
+        if u.path == "/oauth/token":
+            form = {k: v[0] for k, v in parse_qs(raw.decode("utf-8")).items()}
+            gt = form.get("grant_type", "")
+            if gt == "urn:ietf:params:oauth:grant-type:device_code":
+                dc = form.get("device_code", "")
+                with LOCK:
+                    dev = DEVICES.get(dc)
+                    if not dev or form.get("client_id") != dev["client_id"] or not form.get("client_secret"):
+                        return self.send_json(400, {"error": "invalid_client"})
+                    if CTRL["slow_down_once"] > 0:
+                        CTRL["slow_down_once"] -= 1
+                        return self.send_json(400, {"error": "slow_down"})
+                    if not dev["approved"]:
+                        return self.send_json(400, {"error": "authorization_pending"})
+                    DEVICES.pop(dc, None)
+                    CURRENT_TOKEN = f"tok_{NEXT_TOK}"
+                    NEXT_TOK += 1
+                    tok = CURRENT_TOKEN
+                return self.send_json(200, {
+                    "access_token": tok,
+                    "refresh_token": "ref_1",
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                })
+
+            if gt == "refresh_token":
+                if not form.get("client_id") or not form.get("client_secret") or not form.get("refresh_token"):
+                    return self.send_json(400, {"error": "invalid_request"})
+                with LOCK:
+                    if CTRL["force_invalid_grant"] > 0:
+                        CTRL["force_invalid_grant"] -= 1
+                        return self.send_json(400, {"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+                    CURRENT_TOKEN = f"tok_{NEXT_TOK}"
+                    NEXT_TOK += 1
+                    tok = CURRENT_TOKEN
+                    STATS["refreshes"] += 1
+                    rot = CTRL["rotate_refresh"]
+                    if rot > 0:
+                        CTRL["rotate_refresh"] -= 1
+                resp = {"access_token": tok, "expires_in": 3600, "token_type": "Bearer"}
+                if rot > 0:
+                    resp["refresh_token"] = "ref_rotated"
+                return self.send_json(200, resp)
+
+            return self.send_json(400, {"error": "unsupported_grant_type"})
+
+        if u.path == "/upload/youtube/v3/videos":
+            if not self.check_bearer():
+                return self.send_json(401, {"error": {"code": 401, "message": "Invalid Credentials"}})
+            with LOCK:
+                if CTRL["force_quota_403"] > 0:
+                    CTRL["force_quota_403"] -= 1
+                    return self.send_json(403, {"error": {"errors": [{"reason": "quotaExceeded"}]}})
+            if q.get("uploadType") != "resumable":
+                return self.send_json(400, {"error": "expected uploadType=resumable"})
+            data = json.loads(raw.decode("utf-8"))
+            total = int(self.headers.get("X-Upload-Content-Length", "0"))
+            mime = self.headers.get("X-Upload-Content-Type", "")
             with LOCK:
                 sid = f"S{NEXT_SID}"
                 NEXT_SID += 1
-                SESSIONS[sid] = {"buf": bytearray(), "offset": 0, "total": total, "final": False}
-                STATS["scotty_inits"] += 1
+                SESSIONS[sid] = {
+                    "buf": bytearray(),
+                    "offset": 0,
+                    "total": total,
+                    "mime": mime,
+                    "meta": data,
+                    "final": False,
+                    "video_id": "",
+                }
+                STATS["inits"] += 1
             host = self.headers.get("Host", "127.0.0.1")
-            up_url = f"http://{host}/upload/session/{sid}"
-            return self.send_json(200, {"ok": True}, [("x-goog-upload-url", up_url)])
+            return self.send_empty(200, [("Location", f"http://{host}/upload/session/{sid}")])
 
-        if u.path.startswith("/upload/session/"):
-            sid = u.path.split("/upload/session/", 1)[1]
+        if u.path == "/youtube/v3/playlistItems":
+            if not self.check_bearer():
+                return self.send_json(401, {"error": {"code": 401, "message": "Invalid Credentials"}})
             with LOCK:
-                sess = SESSIONS.get(sid)
-            if not sess:
-                return self.send_json(404, {"error": "session expired"})
-            cmd = (self.headers.get("x-goog-upload-command") or "").lower()
-            if cmd == "query":
-                with LOCK:
-                    STATS["scotty_queries"] += 1
-                    if CTRL["expire_next_query"] > 0:
-                        CTRL["expire_next_query"] -= 1
-                        SESSIONS.pop(sid, None)
-                        return self.send_json(410, {"error": "expired"})
-                    off = sess["offset"]
-                    fin = sess["final"]
-                hdrs = [("x-goog-upload-status", "final" if fin else "active"), ("x-goog-upload-size-received", str(off))]
-                body = {"scottyResourceId": f"SCOTTY_{sid}"} if fin else {"status": "active"}
-                return self.send_json(200, body, hdrs)
-
-            if "upload" in cmd:
-                off = int(self.headers.get("x-goog-upload-offset", "0"))
-                clen = int(self.headers.get("Content-Length", "0"))
-                with LOCK:
-                    drop_at = CTRL["drop_once_after"]
-                    rate = CTRL["rate"]
-                    if drop_at > 0:
-                        CTRL["drop_once_after"] = 0
-                got = bytearray()
-                t0 = time.time()
-                rem = clen
-                while rem > 0:
-                    want = min(65536, rem)
-                    if drop_at > 0 and len(got) + want > drop_at:
-                        want = drop_at - len(got)
-                    chunk = self.rfile.read(want) if want > 0 else b""
-                    if not chunk:
-                        break
-                    got.extend(chunk)
-                    rem -= len(chunk)
-                    if drop_at > 0 and len(got) >= drop_at:
-                        with LOCK:
-                            if len(sess["buf"]) < off + len(got):
-                                sess["buf"].extend(b"\x00" * (off + len(got) - len(sess["buf"])))
-                            sess["buf"][off:off + len(got)] = got
-                            sess["offset"] = max(sess["offset"], off + len(got))
-                        try:
-                            self.connection.shutdown(socket.SHUT_RDWR)
-                        except OSError:
-                            pass
-                        self.connection.close()
-                        self.close_connection = True
-                        return
-                    if rate > 0:
-                        ahead = len(got) / rate - (time.time() - t0)
-                        if ahead > 0:
-                            time.sleep(ahead)
-
-                with LOCK:
-                    if len(sess["buf"]) < off + len(got):
-                        sess["buf"].extend(b"\x00" * (off + len(got) - len(sess["buf"])))
-                    sess["buf"][off:off + len(got)] = got
-                    sess["offset"] = max(sess["offset"], off + len(got))
-                    fin = "finalize" in cmd
-                    if fin:
-                        sess["final"] = True
-                    cur_off = sess["offset"]
-                hdrs = [("x-goog-upload-status", "final" if fin else "active"), ("x-goog-upload-size-received", str(cur_off))]
-                body = {"scottyResourceId": f"SCOTTY_{sid}"} if fin else {"received": cur_off}
-                return self.send_json(200, body, hdrs)
-
-            return self.send_json(400, {"error": "unknown upload command"})
-
-        if u.path == "/youtubei/v1/upload/createvideo":
-            if q.get("key") != "mock_api_key":
-                return self.send_json(403, {"error": "bad api key"})
-            clen = int(self.headers.get("Content-Length", "0"))
-            data = json.loads(self.rfile.read(clen).decode("utf-8"))
-            ctx = data.get("context", {})
-            if ctx.get("client", {}).get("clientName") != "WEB_CREATOR":
-                return self.send_json(400, {"error": "expected WEB_CREATOR"})
-            meta = data.get("initialMetadata", {})
-            if meta.get("draftState", {}).get("isDraft") is not False:
-                return self.send_json(400, {"error": "expected draftState.isDraft == false"})
-            scotty_id = data.get("resourceId", {}).get("scottyResourceId", {}).get("id", "")
-            sid = scotty_id.replace("SCOTTY_", "", 1)
+                if CTRL["fail_playlist"] > 0:
+                    CTRL["fail_playlist"] -= 1
+                    return self.send_json(500, {"error": "injected playlist error"})
+            data = json.loads(raw.decode("utf-8"))
+            snip = data.get("snippet", {})
             with LOCK:
-                sess = SESSIONS.get(sid)
-                digest = hashlib.sha256(bytes(sess["buf"])).hexdigest() if sess else ""
-                vid = f"VID_{NEXT_VID}"
-                NEXT_VID += 1
-                STATS["createvideo"].append({
-                    "video_id": vid,
-                    "channel_id": data.get("channelId", ""),
-                    "on_behalf_of": ctx.get("user", {}).get("onBehalfOfUser", ""),
-                    "x_goog_pageid": self.headers.get("X-Goog-PageId", ""),
-                    "title": meta.get("title", {}).get("newTitle", ""),
-                    "description": meta.get("description", {}).get("newDescription", ""),
-                    "privacy": meta.get("privacy", {}).get("newPrivacy", ""),
-                    "scotty_id": scotty_id,
-                    "size": len(sess["buf"]) if sess else 0,
-                    "sha256": digest,
+                pid = f"PLI_{NEXT_PLI}"
+                NEXT_PLI += 1
+                STATS["playlists"].append({
+                    "playlistId": snip.get("playlistId", ""),
+                    "videoId": snip.get("resourceId", {}).get("videoId", ""),
                 })
-            return self.send_json(200, {"videoId": vid})
-
-        if u.path == "/youtubei/v1/video_manager/metadata_update":
-            if q.get("key") != "mock_api_key":
-                return self.send_json(403, {"error": "bad api key"})
-            with LOCK:
-                if CTRL["fail_metadata"] > 0:
-                    CTRL["fail_metadata"] -= 1
-                    return self.send_json(500, {"error": "injected metadata error"})
-            clen = int(self.headers.get("Content-Length", "0"))
-            data = json.loads(self.rfile.read(clen).decode("utf-8"))
-            mfk = data.get("madeForKids", {})
-            if mfk.get("operation") != "MDE_MADE_FOR_KIDS_UPDATE_OPERATION_SET":
-                return self.send_json(400, {"error": "bad madeForKids operation"})
-            if mfk.get("newMfk") == "MDE_MADE_FOR_KIDS_TYPE_MFK" and "addToPlaylist" in data:
-                return self.send_json(400, {"error": "playlists disallowed for MFK"})
-            with LOCK:
-                STATS["metadata_update"].append({
-                    "video_id": data.get("encryptedVideoId", ""),
-                    "new_mfk": mfk.get("newMfk", ""),
-                    "playlists": data.get("addToPlaylist", {}).get("addToPlaylistIds", []),
-                    "x_goog_pageid": self.headers.get("X-Goog-PageId", ""),
-                    "on_behalf_of": data.get("context", {}).get("user", {}).get("onBehalfOfUser", ""),
-                })
-            return self.send_json(200, {"ok": True})
+            return self.send_json(200, {"id": pid})
 
         self.send_json(404, {"error": "unknown endpoint"})
+
+    def do_PUT(self):
+        global NEXT_VID
+        u = urlparse(self.path)
+        if not u.path.startswith("/upload/session/"):
+            return self.send_json(404, {"error": "not found"})
+
+        clen = int(self.headers.get("Content-Length", "0"))
+        cr = self.headers.get("Content-Range", "")
+
+        if not self.check_bearer():
+            # Drain request body before responding 401 cleanly
+            rem = clen
+            while rem > 0:
+                chunk = self.rfile.read(min(65536, rem))
+                if not chunk:
+                    break
+                rem -= len(chunk)
+            return self.send_json(401, {"error": {"code": 401, "message": "Invalid Credentials"}})
+
+        sid = u.path.split("/upload/session/", 1)[1]
+        with LOCK:
+            sess = SESSIONS.get(sid)
+        if not sess:
+            return self.send_json(404, {"error": "session not found"})
+
+        # Offset query: PUT with Content-Length: 0 and Content-Range: bytes */<total>
+        if cr.startswith("bytes */"):
+            with LOCK:
+                STATS["queries"] += 1
+                if CTRL["expire_next_query"] > 0:
+                    CTRL["expire_next_query"] -= 1
+                    SESSIONS.pop(sid, None)
+                    return self.send_json(410, {"error": "upload session expired"})
+                fin = sess["final"]
+                vid = sess["video_id"]
+                off = sess["offset"]
+            if fin and vid:
+                return self.send_json(200, {"id": vid})
+            hdrs = [("Range", f"bytes=0-{off - 1}")] if off > 0 else []
+            return self.send_empty(308, hdrs)
+
+        # Chunk PUT: Content-Range: bytes <start>-<end>/<total>
+        if not cr.startswith("bytes ") or "/" not in cr or "-" not in cr:
+            return self.send_json(400, {"error": f"bad Content-Range: {cr}"})
+        rng_part = cr[6:].split("/", 1)[0]
+        start_s, end_s = rng_part.split("-", 1)
+        start = int(start_s)
+        end = int(end_s)
+
+        with LOCK:
+            drop_at = CTRL["drop_once_after"]
+            rate = CTRL["rate"]
+            if drop_at > 0:
+                CTRL["drop_once_after"] = 0
+
+        got = bytearray()
+        t0 = time.time()
+        rem = clen
+        while rem > 0:
+            want = min(65536, rem)
+            if drop_at > 0 and len(got) + want > drop_at:
+                want = drop_at - len(got)
+            chunk = self.rfile.read(want) if want > 0 else b""
+            if not chunk:
+                break
+            got.extend(chunk)
+            rem -= len(chunk)
+            if drop_at > 0 and len(got) >= drop_at:
+                with LOCK:
+                    if len(sess["buf"]) < start + len(got):
+                        sess["buf"].extend(b"\x00" * (start + len(got) - len(sess["buf"])))
+                    sess["buf"][start:start + len(got)] = got
+                    sess["offset"] = max(sess["offset"], start + len(got))
+                try:
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                self.connection.close()
+                self.close_connection = True
+                return
+            if rate > 0:
+                ahead = len(got) / rate - (time.time() - t0)
+                if ahead > 0:
+                    time.sleep(ahead)
+
+        with LOCK:
+            if len(sess["buf"]) < start + len(got):
+                sess["buf"].extend(b"\x00" * (start + len(got) - len(sess["buf"])))
+            sess["buf"][start:start + len(got)] = got
+            sess["offset"] = max(sess["offset"], start + len(got))
+            cur_off = sess["offset"]
+            total = sess["total"]
+            if end + 1 >= total and cur_off >= total:
+                sess["final"] = True
+                vid = f"VID_{NEXT_VID}"
+                NEXT_VID += 1
+                sess["video_id"] = vid
+                digest = hashlib.sha256(bytes(sess["buf"])).hexdigest()
+                meta = sess["meta"]
+                STATS["videos"].append({
+                    "id": vid,
+                    "mime": sess["mime"],
+                    "size": len(sess["buf"]),
+                    "sha256": digest,
+                    "title": meta.get("snippet", {}).get("title", ""),
+                    "description": meta.get("snippet", {}).get("description", ""),
+                    "categoryId": meta.get("snippet", {}).get("categoryId", ""),
+                    "privacyStatus": meta.get("status", {}).get("privacyStatus", ""),
+                    "selfDeclaredMadeForKids": meta.get("status", {}).get("selfDeclaredMadeForKids"),
+                    "hasPaidProductPlacement": meta.get("paidProductPlacementDetails", {}).get("hasPaidProductPlacement"),
+                })
+                return self.send_json(200, {"id": vid})
+
+        return self.send_empty(308, [("Range", f"bytes=0-{cur_off - 1}")])
 
 
 def main():
     port = int(next((a for a in sys.argv[1:] if a.isdigit()), "18999"))
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     srv.daemon_threads = True
-    print(f"mock YouTube Studio on http://127.0.0.1:{port}", flush=True)
+    print(f"mock Google OAuth + YouTube Data API v3 on http://127.0.0.1:{port}", flush=True)
     srv.serve_forever()
 
 
