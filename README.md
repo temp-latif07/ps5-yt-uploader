@@ -30,7 +30,7 @@ There are two pieces, modeled on [`torbox-ps5`](https://github.com/roieeedouek/t
 
 You need FTP access to the console (e.g. `ftpsrv` / `zftpd`), `elfldr` on port `9021`, and ShadowMountPlus to register titles.
 
-1. Copy the `PPSA97631` folder (from the release zip, or `build/PPSA97631` after building) to **`/data/homebrew/PPSA97631/`**:
+1. Download **`PPSA97631-home-screen-tile-<version>.zip`** from Releases (or extract the `PPSA97631/` folder from `ps5-yt-uploader-<version>.zip`, or use `build/PPSA97631` after building) and copy `PPSA97631/` to **`/data/homebrew/PPSA97631/`**:
    ```sh
    IP=192.168.1.50
    H=ftp://$IP:2120 D=build/PPSA97631

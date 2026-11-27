@@ -130,13 +130,16 @@ package() {
     [[ -f $out/ps5-yt-uploader.elf ]] || build_payload
     [[ -f $out/PPSA97631/eboot.bin ]] || build_title
     local pkg=$out/ps5-yt-uploader-$version
-    rm -rf "$pkg" "$pkg.zip"
+    local tile_zip=$out/PPSA97631-home-screen-tile-$version.zip
+    rm -rf "$pkg" "$pkg.zip" "$tile_zip"
     mkdir -p "$pkg"
     cp "$out/ps5-yt-uploader.elf" "$pkg/"
     cp -r "$out/PPSA97631" "$pkg/"
     cp "$here/README.md" "$pkg/"
     (cd "$out" && python3 -I -m zipfile -c "ps5-yt-uploader-$version.zip" "ps5-yt-uploader-$version")
+    (cd "$out" && python3 -I -m zipfile -c "PPSA97631-home-screen-tile-$version.zip" "PPSA97631")
     echo "package: $pkg.zip"
+    echo "tile: $tile_zip"
 }
 
 case ${1:-all} in

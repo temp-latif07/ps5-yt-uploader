@@ -58,6 +58,7 @@ echo "==> Building PS5 payload, title, and package..."
 ./build.sh all
 
 ELF=build/ps5-yt-uploader.elf
+TILE_ZIP="build/PPSA97631-home-screen-tile-${VERSION}.zip"
 ZIP="build/ps5-yt-uploader-${VERSION}.zip"
 file "$ELF" | grep -qi "ELF 64-bit"
 
@@ -78,6 +79,6 @@ git push origin "$TAG"
 NOTES=$(python3 tools/extract_release_notes.py "$TAG")
 
 if command -v gh >/dev/null 2>&1 && gh auth token >/dev/null 2>&1; then
-    gh release create "$TAG" "$ELF" "$ZIP" --title "$TAG - PS5 YouTube Uploader" --notes "$NOTES"
+    gh release create "$TAG" "$ELF" "$TILE_ZIP" "$ZIP" --title "$TAG - PS5 YouTube Uploader" --notes "$NOTES"
 fi
 echo "Released $TAG"
