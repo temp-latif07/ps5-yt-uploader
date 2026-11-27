@@ -12,11 +12,18 @@
 static pthread_mutex_t g_flow_lock = PTHREAD_MUTEX_INITIALIZER;
 static yt_device_flow g_flow;
 static int g_has_flow;
+static unsigned long g_flow_seq;
+static int g_flow_polling;
+static char g_flow_state[32];
+static char g_flow_err[300];
 
 static void clear_device_flow(void) {
     pthread_mutex_lock(&g_flow_lock);
+    g_flow_seq++;
     memset(&g_flow, 0, sizeof g_flow);
     g_has_flow = 0;
+    g_flow_state[0] = 0;
+    g_flow_err[0] = 0;
     pthread_mutex_unlock(&g_flow_lock);
 }
 
@@ -87,6 +94,11 @@ static void route_status(http_req *r) {
             }
         }
         memset(tok, 0, sizeof tok);
+    }
+    if (!logged && !auth_err[0]) {
+        pthread_mutex_lock(&g_flow_lock);
+        if (g_flow_err[0]) snprintf(auth_err, sizeof auth_err, "%s", g_flow_err);
+        pthread_mutex_unlock(&g_flow_lock);
     }
 
     app_settings st;
@@ -184,11 +196,162 @@ static void route_oauth_config_clear(http_req *r) {
     route_status(r);
 }
 
+static int poll_active_flow_once(unsigned long expect_seq, char *state_out, size_t state_len,
+                                 int *interval_out, char *err_out, size_t err_len) {
+    if (state_out && state_len) state_out[0] = 0;
+    if (err_out && err_len) err_out[0] = 0;
+    if (interval_out) *interval_out = 5;
+
+    if (net_oauth_is_logged_in()) {
+        if (state_out && state_len) snprintf(state_out, state_len, "done");
+        return 1;
+    }
+
+    yt_device_flow flow;
+    unsigned long seq = 0;
+    pthread_mutex_lock(&g_flow_lock);
+    if (!g_has_flow || (expect_seq && g_flow_seq != expect_seq)) {
+        if (state_out && state_len)
+            snprintf(state_out, state_len, "%s", g_flow_state[0] ? g_flow_state : "expired");
+        if (err_out && err_len)
+            snprintf(err_out, err_len, "%s", g_flow_err[0] ? g_flow_err : "No active sign-in code — click New code");
+        pthread_mutex_unlock(&g_flow_lock);
+        return -1;
+    }
+    if (plat_now_ms() >= g_flow.expires_at_ms) {
+        memset(&g_flow, 0, sizeof g_flow);
+        g_has_flow = 0;
+        snprintf(g_flow_state, sizeof g_flow_state, "expired");
+        snprintf(g_flow_err, sizeof g_flow_err, "Sign-in code expired — click New code");
+        if (state_out && state_len) snprintf(state_out, state_len, "%s", g_flow_state);
+        if (err_out && err_len) snprintf(err_out, err_len, "%s", g_flow_err);
+        pthread_mutex_unlock(&g_flow_lock);
+        return -1;
+    }
+    if (g_flow_polling) {
+        if (state_out && state_len)
+            snprintf(state_out, state_len, "%s", g_flow_state[0] ? g_flow_state : "pending");
+        if (interval_out) *interval_out = g_flow.interval_s > 0 ? g_flow.interval_s : 5;
+        if (err_out && err_len) snprintf(err_out, err_len, "%s", g_flow_err);
+        pthread_mutex_unlock(&g_flow_lock);
+        return 0;
+    }
+    g_flow_polling = 1;
+    flow = g_flow;
+    seq = g_flow_seq;
+    pthread_mutex_unlock(&g_flow_lock);
+
+    char st[32] = "error";
+    char err[300] = "";
+    int rc = yt_oauth_poll_device(&flow, st, sizeof st, err, sizeof err);
+    int interval = flow.interval_s > 0 ? flow.interval_s : 5;
+    memset(&flow, 0, sizeof flow);
+
+    pthread_mutex_lock(&g_flow_lock);
+    g_flow_polling = 0;
+    if (g_flow_seq == seq) {
+        if (rc == 0) {
+            g_flow.interval_s = interval;
+            snprintf(g_flow_state, sizeof g_flow_state, "%s", st);
+            g_flow_err[0] = 0;
+        } else {
+            memset(&g_flow, 0, sizeof g_flow);
+            g_has_flow = 0;
+            snprintf(g_flow_state, sizeof g_flow_state, "%s", rc == 1 ? "done" : st);
+            snprintf(g_flow_err, sizeof g_flow_err, "%s", rc == 1 ? "" : err);
+        }
+    }
+    if (state_out && state_len) snprintf(state_out, state_len, "%s", rc == 1 ? "done" : st);
+    if (interval_out) *interval_out = interval;
+    if (err_out && err_len) snprintf(err_out, err_len, "%s", rc == 1 ? "" : err);
+    pthread_mutex_unlock(&g_flow_lock);
+
+    if (rc == 1) {
+        yt_oauth o;
+        char cname[160] = "YouTube";
+        if (net_oauth_get(&o) == 0 && o.channel_name[0])
+            snprintf(cname, sizeof cname, "%s", o.channel_name);
+        memset(&o, 0, sizeof o);
+        plat_log("oauth: signed in to YouTube channel");
+        plat_notify("YouTube: signed in as %s", cname);
+    } else if (rc < 0 && err[0]) {
+        plat_log("oauth: device sign-in %s: %s", st, err);
+    }
+    return rc;
+}
+
+static void *device_poll_thread(void *arg) {
+    unsigned long seq = (unsigned long)(uintptr_t)arg;
+    for (;;) {
+        int iv = 5;
+        pthread_mutex_lock(&g_flow_lock);
+        int active = (g_has_flow && g_flow_seq == seq);
+        if (active) iv = g_flow.interval_s > 0 ? g_flow.interval_s : 5;
+        pthread_mutex_unlock(&g_flow_lock);
+        if (!active) break;
+
+        int ms_left = iv * 1000;
+        while (ms_left > 0) {
+            int step = ms_left > 250 ? 250 : ms_left;
+            plat_sleep_ms(step);
+            ms_left -= step;
+            pthread_mutex_lock(&g_flow_lock);
+            active = (g_has_flow && g_flow_seq == seq);
+            pthread_mutex_unlock(&g_flow_lock);
+            if (!active) break;
+        }
+        if (!active) break;
+
+        char st[32] = "", err[300] = "";
+        int out_iv = iv;
+        int rc = poll_active_flow_once(seq, st, sizeof st, &out_iv, err, sizeof err);
+        if (rc != 0) break;
+    }
+    return NULL;
+}
+
 static void route_oauth_start(http_req *r) {
+    if (net_oauth_is_logged_in()) {
+        sbuf b = {(char *)"{\"ok\":true,\"already_logged_in\":true}", 37, 0};
+        http_send_json(r->fd, 200, &b);
+        return;
+    }
     if (!net_oauth_has_client()) {
         json_err(r->fd, 400, "configure your Google Cloud Client ID first");
         return;
     }
+
+    char force_s[16] = "";
+    form_get(r->body, "force", force_s, sizeof force_s);
+    int force = parse_bool_str(force_s, 0);
+
+    if (!force) {
+        pthread_mutex_lock(&g_flow_lock);
+        if (g_has_flow) {
+            int64_t rem_ms = g_flow.expires_at_ms - plat_now_ms();
+            if (rem_ms > 10000) {
+                char vurl[256], ucode[32];
+                int iv = g_flow.interval_s > 0 ? g_flow.interval_s : 5;
+                int exp = (int)(rem_ms / 1000);
+                snprintf(vurl, sizeof vurl, "%s", g_flow.verification_url);
+                snprintf(ucode, sizeof ucode, "%s", g_flow.user_code);
+                pthread_mutex_unlock(&g_flow_lock);
+
+                sbuf b;
+                sb_init(&b);
+                sb_puts(&b, "{\"ok\":true,\"verification_url\":");
+                sb_json_str(&b, vurl);
+                sb_puts(&b, ",\"user_code\":");
+                sb_json_str(&b, ucode);
+                sb_printf(&b, ",\"expires_in\":%d,\"interval\":%d}", exp, iv);
+                http_send_json(r->fd, 200, &b);
+                sb_free(&b);
+                return;
+            }
+        }
+        pthread_mutex_unlock(&g_flow_lock);
+    }
+
     yt_device_flow flow;
     char err[300] = "";
     if (yt_oauth_start_device(&flow, err, sizeof err) != 0) {
@@ -199,7 +362,14 @@ static void route_oauth_start(http_req *r) {
     pthread_mutex_lock(&g_flow_lock);
     g_flow = flow;
     g_has_flow = 1;
+    unsigned long seq = ++g_flow_seq;
+    g_flow_polling = 0;
+    snprintf(g_flow_state, sizeof g_flow_state, "pending");
+    g_flow_err[0] = 0;
     pthread_mutex_unlock(&g_flow_lock);
+
+    plat_log("oauth: started device sign-in flow (code %s, interval %ds)", flow.user_code, flow.interval_s);
+    plat_start_thread(device_poll_thread, (void *)(uintptr_t)seq);
 
     sbuf b;
     sb_init(&b);
@@ -214,51 +384,10 @@ static void route_oauth_start(http_req *r) {
 }
 
 static void route_oauth_poll(http_req *r) {
-    yt_device_flow flow;
-    int has = 0;
-    pthread_mutex_lock(&g_flow_lock);
-    if (g_has_flow) {
-        flow = g_flow;
-        has = 1;
-    }
-    pthread_mutex_unlock(&g_flow_lock);
-
-    if (!has) {
-        sbuf b;
-        sb_init(&b);
-        sb_puts(&b, "{\"ok\":true,\"state\":\"expired\",\"error\":\"No active sign-in code — click New code\"}");
-        http_send_json(r->fd, 200, &b);
-        sb_free(&b);
-        return;
-    }
-
-    if (plat_now_ms() >= flow.expires_at_ms) {
-        memset(&flow, 0, sizeof flow);
-        clear_device_flow();
-        sbuf b;
-        sb_init(&b);
-        sb_puts(&b, "{\"ok\":true,\"state\":\"expired\",\"error\":\"Sign-in code expired — click New code\"}");
-        http_send_json(r->fd, 200, &b);
-        sb_free(&b);
-        return;
-    }
-
     char state[32] = "error";
     char err[300] = "";
-    int rc = yt_oauth_poll_device(&flow, state, sizeof state, err, sizeof err);
-    if (rc == 0) {
-        pthread_mutex_lock(&g_flow_lock);
-        if (g_has_flow && !strcmp(g_flow.device_code, flow.device_code))
-            g_flow.interval_s = flow.interval_s;
-        pthread_mutex_unlock(&g_flow_lock);
-    } else {
-        clear_device_flow();
-    }
-    int interval = flow.interval_s;
-    memset(&flow, 0, sizeof flow);
-
-    if (rc == 1) plat_log("oauth: signed in to YouTube channel");
-    else if (rc < 0 && err[0]) plat_log("oauth: device sign-in %s (%s)", state, err);
+    int interval = 5;
+    poll_active_flow_once(0, state, sizeof state, &interval, err, sizeof err);
 
     sbuf b;
     sb_init(&b);
@@ -539,6 +668,7 @@ void api_handle(http_req *r) {
     else if (post && !strcmp(p, "settings")) route_settings(r);
     else if (post && !strncmp(p, "jobs/", 5)) route_job_action(r, p + 5);
     else if (post && !strcmp(p, "quit")) {
+        clear_device_flow();
         json_ok(r->fd);
         plat_log("quit requested from the web UI");
         httpd_stop();

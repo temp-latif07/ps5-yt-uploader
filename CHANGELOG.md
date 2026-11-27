@@ -10,6 +10,14 @@ Planned improvements and upcoming fixes.
 
 ---
 
+## 2.0.1
+
+**Fixes**
+- **Background Device Flow Polling & Tab/Device Reuse:** The console server now polls Google's OAuth device-code endpoint on a background thread and reuses the active device code across tab reloads and second devices (such as a phone + TV browser), so returning after Google shows "Success! Device connected" completes sign-in reliably even when mobile browsers pause background JavaScript timers.
+- **Instant Sign-In Sync & Manual Refresh:** Added focus/visibility resume checks, cross-device setup status polling, clear error surfacing via `/api/status`, and a **Check now** button on the device sign-in screen.
+
+---
+
 ## 2.0.0
 
 Ground-up rebuild modeled on the `torbox-ps5` architecture for rock-solid reliability on the PS5 home screen, in the PS5 browser, and on phones/PCs.

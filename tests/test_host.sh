@@ -121,10 +121,15 @@ check "valid client_json accepted" bash -c "echo '$r' | jq_ 'd[\"has_client\"] a
 check "oauth.txt mode 600" bash -c "[[ \$(file_mode '$work/app/oauth.txt') == 600 ]]"
 check "client_secret never leaked in status" bash -c "! get status | grep -q 'GOCSPX-supersecret123'"
 
-# 3. OAuth TV Device Flow (slow_down -> pending -> approve -> done)
+# 3. OAuth TV Device Flow (reuse active flow -> slow_down -> pending -> approve -> done)
 curl -s "$mbase/control?slow_down_once=1" > /dev/null
+ds_before=$(curl -s "$mbase/control/stats" | jq_ 'd["device_starts"]')
 st=$(post oauth/start)
+ds_mid=$(curl -s "$mbase/control/stats" | jq_ 'd["device_starts"]')
+st2=$(post oauth/start)
+ds_after=$(curl -s "$mbase/control/stats" | jq_ 'd["device_starts"]')
 check "oauth/start returns URL & user_code without device_code" bash -c "echo '$st' | jq_ 'd[\"user_code\"]==\"ABCD-EFGH\" and d[\"verification_url\"]==\"https://www.google.com/device\" and (\"device_code\" not in d)' | grep -q True"
+check "oauth/start reuses active flow across tabs/reloads" bash -c "[[ $ds_mid -eq $((ds_before + 1)) && $ds_after -eq $ds_mid ]] && echo '$st2' | jq_ 'd[\"user_code\"]==\"ABCD-EFGH\"' | grep -q True"
 p1=$(post oauth/poll)
 check "oauth/poll handles slow_down & increases interval" bash -c "echo '$p1' | jq_ 'd[\"state\"]==\"slow_down\" and d[\"interval\"]>=6' | grep -q True"
 p2=$(post oauth/poll)
@@ -286,9 +291,23 @@ check "brand-new clip auto-queued and finishes" wait_jobs 20
 check "brand-new clip uploaded automatically" bash -c "get jobs | python3 -I -c 'import json,sys; j=[x for x in json.load(sys.stdin)[\"jobs\"] if \"brand_new_auto.mp4\" in x[\"path\"]][0]; assert j[\"state\"]==\"done\" and j[\"video_id\"].startswith(\"VID_\")'"
 post settings -d auto_upload=0 > /dev/null
 
-# 13. Sign out vs Reset Client ID, quit, and release dry-run checks
+# 13. Sign out, background server-side device poll, Reset Client ID, quit, and release dry-run checks
 post logout > /dev/null
 check "logout clears refresh_token but keeps Client ID" bash -c "get status | jq_ 'd[\"has_client\"] and (not d[\"logged_in\"])' | grep -q True && grep -q 'client_id=1234567890' '$work/app/oauth.txt'"
+
+post oauth/start > /dev/null
+curl -s "$mbase/control?approve_device=1" > /dev/null
+bg_ok=0
+for _ in $(seq 25); do
+    if [[ $(get status | jq_ 'd["logged_in"]') == True ]]; then
+        bg_ok=1
+        break
+    fi
+    sleep 0.2
+done
+check "background server polling completes sign-in without /api/oauth/poll" test "$bg_ok" = 1
+
+post logout > /dev/null
 post oauth/config/clear > /dev/null
 check "oauth/config/clear deletes oauth.txt" test ! -e "$work/app/oauth.txt"
 post quit > /dev/null
@@ -297,7 +316,8 @@ check "quit stops server" bash -c "! curl -s -m 2 '$base/api/status' > /dev/null
 
 check "make_icon produces PNG" bash -c "python3 '$here/title/make_icon.py' '$work/icon.png' && test -s '$work/icon.png'"
 check "payloads.json valid" python3 "$here/tools/update_payloads.py" --check "$here/payloads.json"
-check "extract_release_notes finds 2.0.0" bash -c "python3 '$here/tools/extract_release_notes.py' v2.0.0 '$here/CHANGELOG.md' | grep -q 'PPSA97631'"
+ver=$(sed -n 's/^#define APP_VERSION "\(.*\)"/\1/p' "$here/src/app.h")
+check "extract_release_notes finds $ver" bash -c "python3 '$here/tools/extract_release_notes.py' 'v$ver' '$here/CHANGELOG.md' | grep -q '.'"
 
 echo "$fails failure(s); work dir $work"
 [[ $fails == 0 ]] && rm -rf "$work"

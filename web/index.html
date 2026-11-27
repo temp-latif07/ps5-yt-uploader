@@ -63,7 +63,7 @@
 
     <div id="oauth-signin" class="hidden">
       <h2>Sign in to YouTube</h2>
-      <p class="muted">Scan the QR code with your phone or open the link on any device, then enter the code shown below:</p>
+      <p class="muted">Scan the QR code with your phone or open the link on any device, then enter the code shown below. After Google shows &ldquo;Success! Device connected&rdquo;, return to this tab — your PS5 signs in automatically in the background.</p>
 
       <div class="login-grid">
         <div class="subcard qr-box">
@@ -77,6 +77,7 @@
           <div id="device-code" class="device-code">----</div>
           <p id="device-status" class="muted small">Waiting for Google sign-in code...</p>
           <div class="row wrap">
+            <button id="check-device-now" type="button" class="small primary">Check now</button>
             <button id="copy-device-code" type="button" class="small">Copy code</button>
             <button id="new-device-code" type="button" class="small">New code</button>
           </div>

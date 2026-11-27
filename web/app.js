@@ -142,6 +142,7 @@ const state = {
   clips: [],
   jobs: [],
   pollTimer: 0,
+  statusTimer: 0,
   deviceTimer: 0,
   deviceGen: 0,
   deviceFlow: null,
@@ -219,6 +220,11 @@ async function copyText(txt, okMsg) {
   }
 }
 
+function stopStatusWatch() {
+  clearTimeout(state.statusTimer);
+  state.statusTimer = 0;
+}
+
 function stopDeviceFlow() {
   state.deviceGen++;
   clearTimeout(state.deviceTimer);
@@ -256,19 +262,23 @@ function renderStatus() {
 
     if (!s.has_client || state.editingClient) {
       stopDeviceFlow();
+      stopStatusWatch();
       $("#oauth-setup").classList.remove("hidden");
       $("#oauth-signin").classList.add("hidden");
       $("#cancel-edit-client").classList.toggle("hidden", !s.has_client);
+      state.statusTimer = setTimeout(loadStatus, 3000);
     } else {
+      stopStatusWatch();
       $("#oauth-setup").classList.add("hidden");
       $("#oauth-signin").classList.remove("hidden");
       $("#client-id-hint").textContent = s.client_id_hint || "";
-      if (!state.deviceFlow) startDeviceFlow();
+      if (!state.deviceFlow) startDeviceFlow(false);
     }
     return;
   }
 
   stopDeviceFlow();
+  stopStatusWatch();
   state.editingClient = false;
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
@@ -291,7 +301,7 @@ function applySettingsForm(st) {
   $("#set-auto").checked = !!st.auto_upload;
 }
 
-async function startDeviceFlow() {
+async function startDeviceFlow(force) {
   stopDeviceFlow();
   const gen = state.deviceGen;
   $("#login-error").textContent = "";
@@ -299,8 +309,14 @@ async function startDeviceFlow() {
   $("#device-qr").innerHTML = "";
   $("#device-status").textContent = "Requesting Google sign-in code...";
   try {
-    const r = await api("oauth/start", {});
+    const r = await api("oauth/start", force ? { force: "1" } : {});
     if (gen !== state.deviceGen) return;
+    if (r.already_logged_in) {
+      stopDeviceFlow();
+      await loadStatus();
+      loadClips();
+      return;
+    }
     state.deviceFlow = r;
     $("#device-qr").innerHTML = QR.svg(r.verification_url, 200);
     $("#device-url").href = r.verification_url;
@@ -317,6 +333,7 @@ async function startDeviceFlow() {
 
 async function pollDeviceFlow(gen) {
   if (gen !== state.deviceGen || !state.deviceFlow) return;
+  clearTimeout(state.deviceTimer);
   try {
     const r = await api("oauth/poll", {});
     if (gen !== state.deviceGen) return;
@@ -340,6 +357,7 @@ async function pollDeviceFlow(gen) {
     $("#login-error").textContent = msg;
   } catch (e) {
     if (gen !== state.deviceGen) return;
+    $("#device-status").textContent = "Waiting for console (" + e.message + ")...";
     state.deviceTimer = setTimeout(() => pollDeviceFlow(gen), 5000);
   }
 }
@@ -399,8 +417,27 @@ $("#cancel-edit-client").addEventListener("click", () => {
   state.editingClient = false;
   renderStatus();
 });
-$("#new-device-code").addEventListener("click", startDeviceFlow);
+$("#new-device-code").addEventListener("click", () => startDeviceFlow(true));
+$("#check-device-now").addEventListener("click", async () => {
+  const btn = $("#check-device-now");
+  btn.disabled = true; btn.textContent = "Checking...";
+  try {
+    if (state.deviceFlow) await pollDeviceFlow(state.deviceGen);
+    else await loadStatus();
+  } finally {
+    btn.disabled = false; btn.textContent = "Check now";
+  }
+});
 $("#copy-device-code").addEventListener("click", () => copyText($("#device-code").textContent, "Code copied"));
+
+function syncAuthOnResume() {
+  if (!state.status || !state.status.logged_in) {
+    if (state.deviceFlow) pollDeviceFlow(state.deviceGen);
+    else loadStatus();
+  }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) syncAuthOnResume(); });
+window.addEventListener("focus", syncAuthOnResume);
 
 async function clearClientConfig() {
   if (!confirm("Reset and delete your stored Google Cloud Client ID and tokens from the console?")) return;
