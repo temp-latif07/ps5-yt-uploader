@@ -168,6 +168,45 @@ static int push_clip(clip_entry **arr, int *n, int *cap, const char *full, const
     return 0;
 }
 
+static int is_game_title_id(const char *name) {
+    if (!name || strlen(name) != 9 || !strcmp(name, "NPXS40087")) return 0;
+    for (int i = 0; i < 4; i++)
+        if (name[i] < 'A' || name[i] > 'Z') return 0;
+    for (int i = 4; i < 9; i++)
+        if (name[i] < '0' || name[i] > '9') return 0;
+    return 1;
+}
+
+static void scan_dir_rec(const char *dir, int depth, const char *inherited_tid,
+                         clip_entry **arr, int *n, int *cap) {
+    if (depth > 5 || *n >= 2000) return;
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) && *n < 2000) {
+        if (e->d_name[0] == '.') continue;
+        char sub[1024];
+        snprintf(sub, sizeof sub, "%s/%s", dir, e->d_name);
+        struct stat st;
+        if (lstat(sub, &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) {
+            const char *next_tid = inherited_tid;
+            if (is_game_title_id(e->d_name)) next_tid = e->d_name;
+            else if (!next_tid[0] &&
+                     strcasecmp(e->d_name, "NPXS40087") != 0 &&
+                     strcasecmp(e->d_name, "video") != 0 &&
+                     strcasecmp(e->d_name, "av_contents") != 0 &&
+                     strcasecmp(e->d_name, "av_content") != 0) {
+                next_tid = e->d_name;
+            }
+            scan_dir_rec(sub, depth + 1, next_tid, arr, n, cap);
+        } else if (S_ISREG(st.st_mode) && is_video_filename(e->d_name)) {
+            push_clip(arr, n, cap, sub, e->d_name, inherited_tid, &st);
+        }
+    }
+    closedir(d);
+}
+
 int clips_scan_array(const char *dir, clip_entry **out, int *count_out) {
     *out = NULL;
     *count_out = 0;
@@ -175,34 +214,11 @@ int clips_scan_array(const char *dir, clip_entry **out, int *count_out) {
 
     DIR *d = opendir(dir);
     if (!d) return errno == ENOENT ? 0 : -1;
+    closedir(d);
 
     clip_entry *arr = NULL;
     int n = 0, cap = 0;
-    struct dirent *e;
-    while ((e = readdir(d))) {
-        if (e->d_name[0] == '.') continue;
-        char sub[1024];
-        snprintf(sub, sizeof sub, "%s/%s", dir, e->d_name);
-        struct stat st;
-        if (stat(sub, &st) != 0) continue;
-        if (S_ISDIR(st.st_mode)) {
-            DIR *sd = opendir(sub);
-            if (!sd) continue;
-            struct dirent *se;
-            while ((se = readdir(sd))) {
-                if (se->d_name[0] == '.' || !is_video_filename(se->d_name)) continue;
-                char full[1024];
-                snprintf(full, sizeof full, "%s/%s", sub, se->d_name);
-                struct stat fst;
-                if (stat(full, &fst) == 0 && S_ISREG(fst.st_mode))
-                    push_clip(&arr, &n, &cap, full, se->d_name, e->d_name, &fst);
-            }
-            closedir(sd);
-        } else if (S_ISREG(st.st_mode) && is_video_filename(e->d_name)) {
-            push_clip(&arr, &n, &cap, sub, e->d_name, "", &st);
-        }
-    }
-    closedir(d);
+    scan_dir_rec(dir, 0, "", &arr, &n, &cap);
 
     if (n > 1) qsort(arr, (size_t)n, sizeof *arr, cmp_clips_desc);
     *out = arr;
@@ -255,7 +271,21 @@ static void add_roots_json(sbuf *b) {
     sb_puts(b, "\"roots\":[");
     int first = 1;
 #ifdef __PROSPERO__
-    sb_puts(b, "\"/user/av_content/video\",\"/data\"");
+    struct stat rst;
+    if (stat("/user/av_contents/video", &rst) == 0 && S_ISDIR(rst.st_mode)) {
+        sb_puts(b, "\"/user/av_contents/video\"");
+        first = 0;
+    } else if (stat("/user/av_contents", &rst) == 0 && S_ISDIR(rst.st_mode)) {
+        sb_puts(b, "\"/user/av_contents\"");
+        first = 0;
+    }
+    if (stat("/user/av_content/video", &rst) == 0 && S_ISDIR(rst.st_mode)) {
+        if (!first) sb_puts(b, ",");
+        sb_puts(b, "\"/user/av_content/video\"");
+        first = 0;
+    }
+    if (!first) sb_puts(b, ",");
+    sb_puts(b, "\"/data\"");
     first = 0;
     DIR *d = opendir("/mnt");
     struct stat mnt;

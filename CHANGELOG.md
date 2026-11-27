@@ -10,6 +10,15 @@ Planned improvements and upcoming fixes.
 
 ---
 
+## 2.0.2
+
+**Fixes**
+- **Correct PS5 Captures Path (`/user/av_contents/video`):** Updated capture auto-detection and allowed paths to use `/user/av_contents/video` (with automatic migration away from the old `/user/av_content/video` setting and fallback to `/user/av_contents` or `/data`).
+- **Recursive Clip Scanning & Smart Title IDs:** Recursively scans up to 5 levels deep under captures folders so nested layouts like `/user/av_contents/video/NPXS40087/<TitleID>/...` are discovered cleanly while extracting the game Title ID instead of system folder `NPXS40087`.
+- **Resilient Folder Picker:** Automatically falls back through all available storage roots (`/user/av_contents/video`, `/data`, USB drives) when browsing instead of stalling on a missing folder.
+
+---
+
 ## 2.0.1
 
 **Fixes**

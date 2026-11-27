@@ -1,11 +1,11 @@
 # YouTube Uploader for PS5
 
-Browse your PlayStation 5 gameplay clips (`/user/av_content/video`, `/data`, and USB drives) and upload them **directly from the console to YouTube** via the official YouTube Data API v3, controlled from the TV browser or your phone/PC at `http://<console-ip>:8085`.
+Browse your PlayStation 5 gameplay clips (`/user/av_contents/video`, `/data`, and USB drives) and upload them **directly from the console to YouTube** via the official YouTube Data API v3, controlled from the TV browser or your phone/PC at `http://<console-ip>:8085`.
 
 - **BYO Google Cloud OAuth 2.0 + QR Device Sign-In:**
   - Create your own free Google Cloud OAuth 2.0 client (*TVs and Limited Input devices*) so every user gets their own quota without depending on a shared central project.
   - Upload your `client_secret_*.json` (or scan the **Phone QR** code to import it from your phone/PC), then scan the **Google Device QR code** (`google.com/device`) and enter the on-screen code.
-- **Clip Browser & Range Video Preview:** Scans `/user/av_content/video` (plus `/data` and mounted `/mnt/usbN` / `/mnt/extN` drives), groups by Game Title ID, marks already-uploaded clips with clickable `youtu.be` links, and previews videos in-browser before uploading.
+- **Clip Browser & Range Video Preview:** Scans `/user/av_contents/video` (plus `/data` and mounted `/mnt/usbN` / `/mnt/extN` drives), groups by Game Title ID, marks already-uploaded clips with clickable `youtu.be` links, and previews videos in-browser before uploading.
 - **Manual Curation & Resumable Background Queue:** Edit Title, Description, Privacy (*Unlisted*, *Public*, *Private*), Audience (*Made for Kids*), and optional Playlist ID. Uploads stream directly from disk via YouTube Data API v3 resumable sessions (`308 Resume Incomplete`) with live progress, speed, ETA, Pause, Resume, Retry, and Cancel — surviving network drops and console restarts.
 - **Optional Auto-Upload (Off by Default):** Enable in Settings to automatically upload *new* clips saved after turning it on (pre-existing clips are never backfilled).
 

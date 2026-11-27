@@ -98,7 +98,10 @@ static void load_settings(void) {
             int p = atoi(v);
             if (p >= 1 && p <= 2) g_settings.parallel = p;
         } else if (!strcmp(k, "captures_dir") && v[0] && plat_path_allowed(v)) {
-            snprintf(g_settings.captures_dir, sizeof g_settings.captures_dir, "%s", v);
+            struct stat cst;
+            if (strcmp(v, "/user/av_content/video") != 0 || (stat(v, &cst) == 0 && S_ISDIR(cst.st_mode))) {
+                snprintf(g_settings.captures_dir, sizeof g_settings.captures_dir, "%s", v);
+            }
         }
     }
     fclose(f);

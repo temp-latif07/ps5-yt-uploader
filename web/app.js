@@ -689,7 +689,11 @@ async function openPicker(start) {
     p = p.slice(0, p.lastIndexOf("/"));
   }
   const r = await api("dirs").catch(() => null);
-  if (r && r.roots && r.roots.length) browse(r.roots[0]);
+  if (r && r.roots && r.roots.length) {
+    for (let i = 0; i < r.roots.length; i++) {
+      if (await browse(r.roots[i], i + 1 < r.roots.length)) return;
+    }
+  }
 }
 
 async function browse(path, quiet) {
@@ -705,7 +709,7 @@ async function browse(path, quiet) {
   $("#picker-free").textContent = r.free !== undefined ? size(r.free) + " free" : "";
   $("#picker-roots").replaceChildren(...r.roots.map((root) => el("button", { type: "button", onclick: () => browse(root) },
     root.startsWith("/mnt/usb") ? "USB " + root.slice(8) : root.startsWith("/mnt/ext") ? "Ext " + root.slice(8) :
-    root === "/user/av_content/video" ? "PS5 Captures" : root)));
+    (root === "/user/av_contents/video" || root === "/user/av_contents" || root === "/user/av_content/video") ? "PS5 Captures" : root)));
   const items = r.dirs.map((d) => el("li", { onclick: () => browse(r.path.replace(/\/$/, "") + "/" + d) }, d + "/"));
   const files = (r.files || []).map((f) => el("li", { class: "file" }, el("span", {}, f.name), el("span", {}, size(f.size))));
   $("#picker-dirs").replaceChildren(...(items.length || files.length ? items.concat(files) : [el("li", { class: "empty" }, "Empty folder")]));

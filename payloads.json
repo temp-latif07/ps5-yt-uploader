@@ -5,12 +5,12 @@
       "id": "ps5-yt-uploader",
       "name": "PS5 YouTube Uploader",
       "filename": "ps5-yt-uploader.elf",
-      "url": "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v2.0.1/ps5-yt-uploader.elf",
+      "url": "https://github.com/temp-latif07/ps5-yt-uploader/releases/download/v2.0.2/ps5-yt-uploader.elf",
       "description": "Upload PS5 gameplay clips directly to YouTube Studio via home-screen tile or web UI.",
-      "version": "v2.0.1",
+      "version": "v2.0.2",
       "last_update": "2026-11-27",
       "category": "Utilities",
-      "checksum": "0196a566dd4ab2c14cbe0d79ab0d645c9c41c1fa482c52041382c5ac5c5b2b61",
+      "checksum": "e32aaee89ca97134b3d1d8c96c2dd303c4ce49ae48d0996ae3ca70bf0a6cbd0d",
       "author": "Latif Muhammad",
       "source": "https://github.com/temp-latif07/ps5-yt-uploader"
     }

@@ -141,12 +141,15 @@ check "status reports channel after sign-in" bash -c "get status | jq_ 'd[\"logg
 check "tokens & secrets never leaked in status" bash -c "! get status | grep -qE 'ref_1|tok_2|GOCSPX-supersecret123|DEV_CODE_'"
 check "tokens & secrets never leaked in logs" bash -c "! grep -rqE 'ref_1|tok_2|GOCSPX-supersecret123|DEV_CODE_' '$work/app/log.txt' '$work/app.log'"
 
-# 4. Clips scanning, folder picker, Range streaming & security
+# 4. Clips scanning, nested PS5 layout, folder picker, Range streaming & security
+mkdir -p "$work/cap/NPXS40087/PPSA55555/2026"
+make_clip "$work/cap/NPXS40087/PPSA55555/2026/deep_clip.mp4" 1
+sleep 1.1
 make_clip "$work/cap/clip2.webm" 1
 sleep 1.1
 make_clip "$work/cap/PPSA01234/clip1.mp4" 9
 make_clip "$work/extra/usb_clip.mp4" 2
-check "clips sorted newest first with title_id" bash -c "get clips | jq_ 'len(d[\"clips\"])==2 and d[\"clips\"][0][\"name\"]==\"clip1.mp4\" and d[\"clips\"][0][\"title_id\"]==\"PPSA01234\" and d[\"clips\"][1][\"name\"]==\"clip2.webm\"' | grep -q True"
+check "clips sorted newest first with nested title_id" bash -c "get clips | jq_ 'len(d[\"clips\"])==3 and d[\"clips\"][0][\"name\"]==\"clip1.mp4\" and d[\"clips\"][0][\"title_id\"]==\"PPSA01234\" and d[\"clips\"][1][\"name\"]==\"clip2.webm\" and d[\"clips\"][2][\"name\"]==\"deep_clip.mp4\" and d[\"clips\"][2][\"title_id\"]==\"PPSA55555\"' | grep -q True"
 check "dirs lists subdirs and refuses /etc and .." bash -c "get 'dirs?path=$work/cap' | grep -q PPSA01234 && get 'dirs?path=/etc' | grep -q outside && get 'dirs?path=$work/cap/../..' | grep -q outside"
 check "stream returns 206 Partial Content" bash -c "[[ \$(curl -s -o /dev/null -w '%{http_code}' -H 'Range: bytes=0-99' '$base/api/stream?path=$work/cap/PPSA01234/clip1.mp4') == 206 ]]"
 check "stream blocks oauth.txt (403)" bash -c "[[ \$(curl -s -o /dev/null -w '%{http_code}' '$base/api/stream?path=$work/app/oauth.txt') == 403 ]]"

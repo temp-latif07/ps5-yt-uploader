@@ -54,7 +54,19 @@ static void resolve_host_path(char *dst, size_t len, const char *val) {
 void plat_init(void) {
 #ifdef __PROSPERO__
     snprintf(g_app_dir, sizeof g_app_dir, "/data/ps5-yt-uploader");
-    snprintf(g_captures_dir, sizeof g_captures_dir, "/user/av_content/video");
+    static const char *const cap_candidates[] = {
+        "/user/av_contents/video",
+        "/user/av_contents",
+        "/user/av_content/video",
+    };
+    snprintf(g_captures_dir, sizeof g_captures_dir, "%s", cap_candidates[0]);
+    for (unsigned i = 0; i < sizeof cap_candidates / sizeof *cap_candidates; i++) {
+        struct stat st;
+        if (stat(cap_candidates[i], &st) == 0 && S_ISDIR(st.st_mode)) {
+            snprintf(g_captures_dir, sizeof g_captures_dir, "%s", cap_candidates[i]);
+            break;
+        }
+    }
 #else
     const char *dir = getenv("PS5YT_APP_DIR");
     const char *cap = getenv("PS5YT_CAPTURES_DIR");
@@ -143,7 +155,7 @@ int plat_path_allowed(const char *path) {
     size_t n = strlen(path);
     if ((n >= 3 && !strcmp(path + n - 3, "/..")) || (n >= 2 && !strcmp(path + n - 2, "/."))) return 0;
 #ifdef __PROSPERO__
-    if (under(path, "/user/av_content") || under(path, "/data")) return 1;
+    if (under(path, "/user/av_contents") || under(path, "/user/av_content") || under(path, "/data")) return 1;
     if (!strncmp(path, "/mnt/usb", 8) || !strncmp(path, "/mnt/ext", 8)) {
         const char *p = path + 8;
         while (*p >= '0' && *p <= '9') p++;
