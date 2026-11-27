@@ -13,6 +13,11 @@
     <img src="favicon.svg" alt="" width="26" height="26">
     <span>YouTube Uploader <small>for PS5</small></span>
   </div>
+  <nav id="tabs" class="top-nav hidden" role="tablist">
+    <button type="button" data-tab="clips" class="active">Media Gallery</button>
+    <button type="button" data-tab="uploads">Uploads<span id="badge" class="badge hidden">0</span></button>
+    <button type="button" data-tab="settings">Settings</button>
+  </nav>
   <div class="top-right">
     <button id="btn-qr" type="button" class="small">Phone QR</button>
     <div id="conn" class="pill">connecting...</div>
@@ -20,7 +25,7 @@
 </header>
 
 <main>
-  <section id="login" class="card hidden">
+  <section id="login" class="card auth-card hidden">
     <div id="oauth-setup">
       <h2>Set up your Google Cloud Client ID</h2>
       <p class="muted">Create your own free OAuth 2.0 client in Google Cloud Console so your console uploads directly with your personal quota:</p>
@@ -96,35 +101,43 @@
   </section>
 
   <section id="app" class="hidden">
-    <nav id="tabs" class="tabs" role="tablist">
-      <button type="button" data-tab="clips" class="active">Clips</button>
-      <button type="button" data-tab="uploads">Uploads <span id="badge" class="badge hidden">0</span></button>
-      <button type="button" data-tab="settings">Settings</button>
-    </nav>
-
     <div id="clips-view">
-      <div class="folderbar card">
-        <label for="folder">Captures folder</label>
+      <div id="active-strip" class="active-strip hidden">
+        <div class="row wrap grow">
+          <span id="active-strip-text" class="small"></span>
+        </div>
         <div class="row">
-          <input id="folder" type="text" spellcheck="false" autocomplete="off">
-          <button id="browse" type="button">Browse</button>
+          <div class="active-strip-bar"><div id="active-strip-pct" style="width:0%"></div></div>
+          <button id="active-strip-open" type="button" class="small">Open Uploads</button>
         </div>
       </div>
-      <div class="toolbar">
-        <input id="filter" type="search" placeholder="Filter by clip or game ID">
-        <button id="refresh" type="button">Refresh</button>
+
+      <div class="gallery-toolbar">
+        <select id="game-filter" aria-label="Filter by game">
+          <option value="all">All games</option>
+        </select>
+        <div id="status-filter" class="segmented" role="group" aria-label="Filter by upload status">
+          <button type="button" data-status="all" class="active">All</button>
+          <button type="button" data-status="pending">Not uploaded</button>
+          <button type="button" data-status="uploaded">Uploaded</button>
+        </div>
+        <input id="filter" type="search" placeholder="Search clips or game ID">
+        <input id="folder" type="hidden">
+        <button id="browse" type="button" class="small" title="Change captures or USB folder">Folder: PS5 Captures</button>
+        <button id="refresh" type="button" class="small">Refresh</button>
       </div>
-      <p id="clips-status" class="muted"></p>
-      <div id="clips"></div>
+
+      <p id="clips-status" class="muted small"></p>
+      <div id="clips" class="gallery-grid"></div>
     </div>
 
     <div id="uploads-view" class="hidden">
       <div class="toolbar">
         <span class="grow muted small">Uploads stream in the background even while playing games.</span>
-        <button id="clear" type="button">Clear finished</button>
+        <button id="clear" type="button" class="small">Clear finished</button>
       </div>
       <div id="jobs"></div>
-      <p id="jobs-empty" class="muted">No uploads yet. Pick a clip in Clips to upload it to YouTube.</p>
+      <p id="jobs-empty" class="muted">No uploads yet. Select any clip in Media Gallery to preview and upload it to YouTube.</p>
     </div>
 
     <div id="settings-view" class="hidden">
@@ -170,7 +183,7 @@
         </div>
       </form>
 
-      <div class="card col">
+      <div class="card settings-card col">
         <h3>YouTube Account &amp; Client ID</h3>
         <p class="muted small">Active Google Cloud Client ID: <code id="set-client-hint"></code></p>
         <p class="muted small">Signing out removes your YouTube sign-in token but keeps your Client ID for quick QR sign-in. Resetting deletes the Client ID too.</p>
@@ -189,71 +202,76 @@
   </section>
 </main>
 
-<!-- Upload curation modal -->
+<!-- Unified Clip Viewer & Upload Modal -->
 <div id="upload-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="up-title-hdr">
-  <div class="modal-box">
+  <div class="modal-box studio">
     <div class="modal-head">
-      <h3 id="up-title-hdr">Upload clip to YouTube</h3>
+      <h3 id="up-title-hdr">Clip Viewer &amp; Upload</h3>
       <button id="up-close" class="link" type="button">Close</button>
     </div>
-    <p id="up-clip-info" class="muted small"></p>
-    <form id="upload-form" class="col">
-      <input id="up-path" type="hidden">
-      <label>Title
-        <input id="up-title" type="text" maxlength="100" required>
-      </label>
-      <label>Description
-        <textarea id="up-desc" rows="3"></textarea>
-      </label>
-      <div class="grid-2">
-        <label>Privacy
-          <select id="up-privacy">
-            <option value="UNLISTED">Unlisted</option>
-            <option value="PUBLIC">Public</option>
-            <option value="PRIVATE">Private</option>
-          </select>
-        </label>
-        <label>Audience (Made for Kids)
-          <select id="up-mfk">
-            <option value="0">No, not made for kids</option>
-            <option value="1">Yes, made for kids</option>
-          </select>
-        </label>
+    <div class="studio-grid">
+      <div class="col">
+        <video id="up-video" controls playsinline preload="metadata"></video>
+        <div class="row wrap">
+          <span id="up-clip-info" class="muted small grow"></span>
+          <a id="up-prev-yt" class="yt-link small hidden" target="_blank" rel="noopener"></a>
+        </div>
       </div>
-      <label>Add to playlist ID (optional)
-        <input id="up-playlist" type="text" placeholder="PL..." spellcheck="false">
-      </label>
-      <p id="up-mfk-note" class="muted small hidden">Playlists cannot be assigned when a video is marked Made for Kids.</p>
-      <p id="up-error" class="error"></p>
-      <div class="row">
-        <button id="up-cancel" type="button">Cancel</button>
-        <span class="grow"></span>
-        <button id="up-submit" type="submit" class="primary">Queue upload</button>
-      </div>
-    </form>
-  </div>
-</div>
 
-<!-- Video preview modal -->
-<div id="preview-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="prev-title">
-  <div class="modal-box wide">
-    <div class="modal-head">
-      <h3 id="prev-title">Clip preview</h3>
-      <button id="prev-close" class="link" type="button">Close</button>
+      <form id="upload-form" class="col">
+        <input id="up-path" type="hidden">
+        <label>Title
+          <input id="up-title" type="text" maxlength="100" required>
+        </label>
+        <label>Description
+          <textarea id="up-desc" rows="3"></textarea>
+        </label>
+        <div class="grid-2">
+          <label>Privacy
+            <select id="up-privacy">
+              <option value="UNLISTED">Unlisted</option>
+              <option value="PUBLIC">Public</option>
+              <option value="PRIVATE">Private</option>
+            </select>
+          </label>
+          <label>Audience (Made for Kids)
+            <select id="up-mfk">
+              <option value="0">No, not made for kids</option>
+              <option value="1">Yes, made for kids</option>
+            </select>
+          </label>
+        </div>
+        <label>Playlist (optional)
+          <div class="row">
+            <select id="up-playlist-select" class="grow">
+              <option value="">None</option>
+              <option value="__custom__">Enter custom playlist ID...</option>
+            </select>
+            <button id="refresh-playlists" type="button" class="small" title="Refresh playlists from YouTube">Refresh</button>
+          </div>
+        </label>
+        <input id="up-playlist-custom" class="hidden" type="text" placeholder="PL..." spellcheck="false">
+        <p id="up-playlist-status" class="muted small hidden"></p>
+        <p id="up-mfk-note" class="muted small hidden">Playlists cannot be assigned when a video is marked Made for Kids.</p>
+        <p id="up-error" class="error"></p>
+        <div class="row">
+          <button id="up-cancel" type="button">Cancel</button>
+          <span class="grow"></span>
+          <button id="up-submit" type="submit" class="primary">Upload to YouTube</button>
+        </div>
+      </form>
     </div>
-    <video id="prev-video" controls playsinline preload="metadata"></video>
-    <p id="prev-meta" class="muted small"></p>
   </div>
 </div>
 
-<!-- Phone QR modal -->
+<!-- QR modal (Phone link or YouTube share link) -->
 <div id="qr-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="qr-modal-title">
   <div class="modal-box center">
     <div class="modal-head full">
       <h3 id="qr-modal-title">Open on phone or PC</h3>
       <button id="qr-close" class="link" type="button">Close</button>
     </div>
-    <p class="muted small">Scan with your phone camera on the same Wi-Fi network:</p>
+    <p id="qr-modal-sub" class="muted small">Scan with your phone camera on the same Wi-Fi network:</p>
     <div id="modal-qr" class="qr-svg"></div>
     <div class="row full">
       <input id="modal-qr-url" type="text" readonly>

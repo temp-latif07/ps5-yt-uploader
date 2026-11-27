@@ -141,15 +141,31 @@ check "status reports channel after sign-in" bash -c "get status | jq_ 'd[\"logg
 check "tokens & secrets never leaked in status" bash -c "! get status | grep -qE 'ref_1|tok_2|GOCSPX-supersecret123|DEV_CODE_'"
 check "tokens & secrets never leaked in logs" bash -c "! grep -rqE 'ref_1|tok_2|GOCSPX-supersecret123|DEV_CODE_' '$work/app/log.txt' '$work/app.log'"
 
-# 4. Clips scanning, nested PS5 layout, folder picker, Range streaming & security
+# 4. Clips scanning, nested PS5 layout + .dat game name, playlists, folder picker, Range streaming & security
 mkdir -p "$work/cap/NPXS40087/PPSA55555/2026"
 make_clip "$work/cap/NPXS40087/PPSA55555/2026/deep_clip.mp4" 1
+python3 -I -c 'import sys; open(sys.argv[1],"wb").write(b"\x00"*0x44 + b"ASTRO\x27s PLAYROOM_20261127180000\x00")' "$work/cap/NPXS40087/PPSA55555/2026/deep_clip.dat"
 sleep 1.1
 make_clip "$work/cap/clip2.webm" 1
 sleep 1.1
 make_clip "$work/cap/PPSA01234/clip1.mp4" 9
 make_clip "$work/extra/usb_clip.mp4" 2
-check "clips sorted newest first with nested title_id" bash -c "get clips | jq_ 'len(d[\"clips\"])==3 and d[\"clips\"][0][\"name\"]==\"clip1.mp4\" and d[\"clips\"][0][\"title_id\"]==\"PPSA01234\" and d[\"clips\"][1][\"name\"]==\"clip2.webm\" and d[\"clips\"][2][\"name\"]==\"deep_clip.mp4\" and d[\"clips\"][2][\"title_id\"]==\"PPSA55555\"' | grep -q True"
+check "clips sorted newest first with nested title_id & .dat game_name" bash -c "get clips | jq_ 'len(d[\"clips\"])==3 and d[\"clips\"][0][\"name\"]==\"clip1.mp4\" and d[\"clips\"][0][\"title_id\"]==\"PPSA01234\" and d[\"clips\"][1][\"name\"]==\"clip2.webm\" and d[\"clips\"][2][\"name\"]==\"deep_clip.mp4\" and d[\"clips\"][2][\"title_id\"]==\"PPSA55555\" and d[\"clips\"][2][\"game_name\"]==\"ASTRO\x27s PLAYROOM\"' | grep -q True"
+
+pl_before=$(curl -s "$mbase/control/stats" | jq_ 'd["playlist_lists"]')
+pl1=$(get playlists)
+pl_mid=$(curl -s "$mbase/control/stats" | jq_ 'd["playlist_lists"]')
+pl2=$(get playlists)
+pl_cached=$(curl -s "$mbase/control/stats" | jq_ 'd["playlist_lists"]')
+curl -s "$mbase/control?force_401_once=1" > /dev/null
+pl3=$(get 'playlists?refresh=1')
+pl_refreshed=$(curl -s "$mbase/control/stats" | jq_ 'd["playlist_lists"]')
+check "playlists fetched, cached, and refreshed on 401" bash -c "
+[[ $pl_mid -eq $((pl_before + 1)) && $pl_cached -eq $pl_mid && $pl_refreshed -gt $pl_mid ]] &&
+echo '$pl1' | jq_ 'len(d[\"playlists\"])==2 and d[\"playlists\"][0][\"id\"]==\"PL123\" and d[\"playlists\"][0][\"title\"]==\"PS5 Highlights\" and d[\"playlists\"][0][\"count\"]==14' | grep -q True &&
+echo '$pl3' | jq_ 'd[\"playlists\"][1][\"id\"]==\"PL999\"' | grep -q True
+"
+
 check "dirs lists subdirs and refuses /etc and .." bash -c "get 'dirs?path=$work/cap' | grep -q PPSA01234 && get 'dirs?path=/etc' | grep -q outside && get 'dirs?path=$work/cap/../..' | grep -q outside"
 check "stream returns 206 Partial Content" bash -c "[[ \$(curl -s -o /dev/null -w '%{http_code}' -H 'Range: bytes=0-99' '$base/api/stream?path=$work/cap/PPSA01234/clip1.mp4') == 206 ]]"
 check "stream blocks oauth.txt (403)" bash -c "[[ \$(curl -s -o /dev/null -w '%{http_code}' '$base/api/stream?path=$work/app/oauth.txt') == 403 ]]"
@@ -160,6 +176,10 @@ r=$(post upload --data-urlencode "path=$work/cap/PPSA01234/clip1.mp4" -d "title=
     --data-urlencode "description=Line1
 Line2" -d privacy=PUBLIC -d made_for_kids=0 -d playlist_id=PL123)
 jid1=$(echo "$r" | jq_ 'd["id"]')
+check "sticky upload settings saved immediately" bash -c "
+echo '$r' | jq_ 'd[\"settings\"][\"default_privacy\"]==\"PUBLIC\" and d[\"settings\"][\"made_for_kids\"] is False and d[\"settings\"][\"last_playlist_id\"]==\"PL123\"' | grep -q True &&
+get status | jq_ 'd[\"settings\"][\"default_privacy\"]==\"PUBLIC\" and d[\"settings\"][\"last_playlist_id\"]==\"PL123\"' | grep -q True
+"
 check "upload 1 finishes" wait_jobs 30
 want_sha=$(sha_of "$work/cap/PPSA01234/clip1.mp4")
 check "Data API v3 SHA-256, categoryId=20, privacy=public, playlist match" bash -c "

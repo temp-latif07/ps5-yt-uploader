@@ -35,6 +35,7 @@ NEXT_PLI = 1
 STATS = {
     "device_starts": 0,
     "refreshes": 0,
+    "playlist_lists": 0,
     "inits": 0,
     "queries": 0,
     "videos": [],
@@ -102,6 +103,27 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, {
                 "kind": "youtube#channelListResponse",
                 "items": [{"id": "UC_TEST_123", "snippet": {"title": "PS5 Test Channel"}}],
+            })
+
+        if u.path == "/youtube/v3/playlists":
+            if not self.check_bearer():
+                return self.send_json(401, {"error": {"code": 401, "message": "Invalid Credentials"}})
+            with LOCK:
+                STATS["playlist_lists"] += 1
+            return self.send_json(200, {
+                "kind": "youtube#playlistListResponse",
+                "items": [
+                    {
+                        "id": "PL123",
+                        "snippet": {"title": "PS5 Highlights"},
+                        "contentDetails": {"itemCount": 14},
+                    },
+                    {
+                        "id": "PL999",
+                        "snippet": {"title": "Boss Fights"},
+                        "contentDetails": {"itemCount": 3},
+                    },
+                ],
             })
 
         self.send_json(404, {"error": "not found"})

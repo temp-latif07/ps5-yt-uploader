@@ -60,10 +60,11 @@ static void save_settings_locked(void) {
     if (!f) return;
     fprintf(f,
             "default_privacy=%s\nmade_for_kids=%d\nauto_upload=%d\n"
-            "auto_upload_since=%lld\nchunk_mb=%d\nparallel=%d\ncaptures_dir=%s\n",
+            "auto_upload_since=%lld\nchunk_mb=%d\nparallel=%d\ncaptures_dir=%s\nlast_playlist_id=%s\n",
             g_settings.default_privacy, g_settings.made_for_kids ? 1 : 0,
             g_settings.auto_upload ? 1 : 0, (long long)g_settings.auto_upload_since,
-            g_settings.chunk_mb, g_settings.parallel, g_settings.captures_dir);
+            g_settings.chunk_mb, g_settings.parallel, g_settings.captures_dir,
+            g_settings.last_playlist_id);
     fclose(f);
     rename(tmp, path);
 }
@@ -102,6 +103,8 @@ static void load_settings(void) {
             if (strcmp(v, "/user/av_content/video") != 0 || (stat(v, &cst) == 0 && S_ISDIR(cst.st_mode))) {
                 snprintf(g_settings.captures_dir, sizeof g_settings.captures_dir, "%s", v);
             }
+        } else if (!strcmp(k, "last_playlist_id")) {
+            snprintf(g_settings.last_playlist_id, sizeof g_settings.last_playlist_id, "%s", v);
         }
     }
     fclose(f);
@@ -835,6 +838,7 @@ int upload_settings_set(const app_settings *in, char *err, size_t errlen) {
     g_settings.chunk_mb = in->chunk_mb;
     g_settings.parallel = in->parallel;
     if (in->captures_dir[0]) snprintf(g_settings.captures_dir, sizeof g_settings.captures_dir, "%s", in->captures_dir);
+    snprintf(g_settings.last_playlist_id, sizeof g_settings.last_playlist_id, "%s", in->last_playlist_id);
 
     if (!prev_auto && in->auto_upload) {
         g_settings.auto_upload = 1;
@@ -849,6 +853,21 @@ int upload_settings_set(const app_settings *in, char *err, size_t errlen) {
     pthread_cond_broadcast(&g_cv);
     pthread_mutex_unlock(&g_lock);
     return 0;
+}
+
+void upload_remember_meta(const yt_video_meta *meta) {
+    if (!meta) return;
+    pthread_mutex_lock(&g_lock);
+    if (!strcmp(meta->privacy, "UNLISTED") ||
+        !strcmp(meta->privacy, "PUBLIC") ||
+        !strcmp(meta->privacy, "PRIVATE")) {
+        snprintf(g_settings.default_privacy, sizeof g_settings.default_privacy, "%s", meta->privacy);
+    }
+    g_settings.made_for_kids = meta->made_for_kids ? 1 : 0;
+    snprintf(g_settings.last_playlist_id, sizeof g_settings.last_playlist_id, "%s",
+             meta->made_for_kids ? "" : meta->playlist_id);
+    save_settings_locked();
+    pthread_mutex_unlock(&g_lock);
 }
 
 int upload_add(const char *path, const yt_video_meta *meta, char *err, size_t errlen) {

@@ -10,6 +10,8 @@
 
 const unsigned char cacert_pem[] = "";
 const size_t cacert_pem_len = 0;
+const unsigned char tile_icon_png[] = "";
+const size_t tile_icon_png_len = 0;
 void api_handle(http_req *req) { (void)req; }
 
 static void test_json(void) {

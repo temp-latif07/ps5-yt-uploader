@@ -900,3 +900,80 @@ int yt_playlist_add(const char *access_token, const char *playlist_id, const cha
     if (err && errlen) snprintf(err, errlen, "playlist add failed (HTTP %ld)", status);
     return -1;
 }
+
+int yt_fetch_playlists(const char *access_token, sbuf *items_json_out, int *http_status,
+                       char *err, size_t errlen) {
+    ensure_urls();
+    if (http_status) *http_status = 0;
+    if (!access_token || !access_token[0] || !items_json_out) {
+        if (http_status) *http_status = 401;
+        if (err && errlen) snprintf(err, errlen, "missing access token");
+        return -1;
+    }
+
+    char url[640];
+    snprintf(url, sizeof url, "%s/playlists?part=snippet,contentDetails&mine=true&maxResults=50", g_api_base);
+
+    CURL *c = curl_easy_init();
+    if (!c) {
+        if (err && errlen) snprintf(err, errlen, "curl init failed");
+        return -1;
+    }
+
+    struct curl_slist *hdr = append_bearer(NULL, access_token);
+    sbuf resp;
+    sb_init(&resp);
+
+    net_apply(c);
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_sbuf);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
+
+    CURLcode rc = curl_easy_perform(c);
+    long status = 0;
+    if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
+    else if (err && errlen) snprintf(err, errlen, "%s", curl_easy_strerror(rc));
+
+    curl_slist_free_all(hdr);
+    curl_easy_cleanup(c);
+    if (http_status) *http_status = (int)status;
+
+    if (rc != CURLE_OK) {
+        sb_free(&resp);
+        return -1;
+    }
+    if (status != 200 || !resp.data) {
+        if (err && errlen) {
+            if (status == 401) snprintf(err, errlen, "YouTube access token expired (HTTP 401)");
+            else snprintf(err, errlen, "YouTube playlists fetch failed (HTTP %ld)", status);
+        }
+        sb_free(&resp);
+        return -1;
+    }
+
+    sb_init(items_json_out);
+    sb_puts(items_json_out, "[");
+    const char *items = json_find(resp.data, "items");
+    int count = 0;
+    for (const char *el = json_array_first(items); el; el = json_array_next(el)) {
+        char id[64] = "", title[256] = "";
+        const char *idv = json_find(el, "id");
+        const char *snip = json_find(el, "snippet");
+        const char *tv = json_find(snip, "title");
+        const char *cd = json_find(el, "contentDetails");
+        long long cnt = json_int(json_find(cd, "itemCount"), 0);
+        if (!idv || json_string(idv, id, sizeof id) != 0 || !id[0]) continue;
+        if (!tv || json_string(tv, title, sizeof title) != 0 || !title[0]) snprintf(title, sizeof title, "%s", id);
+        if (count++) sb_puts(items_json_out, ",");
+        sb_puts(items_json_out, "{\"id\":");
+        sb_json_str(items_json_out, id);
+        sb_puts(items_json_out, ",\"title\":");
+        sb_json_str(items_json_out, title);
+        sb_printf(items_json_out, ",\"count\":%lld}", cnt);
+    }
+    sb_puts(items_json_out, "]");
+    sb_free(&resp);
+    return 0;
+}

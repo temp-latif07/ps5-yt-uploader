@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define APP_VERSION "2.0.2"
+#define APP_VERSION "2.1.0"
 #define APP_NAME "ps5-yt-uploader"
 #define APP_TITLE_ID "PPSA97631"
 #define APP_PORT 8085
@@ -43,12 +43,14 @@ typedef struct {
     int chunk_mb;
     int parallel;
     char captures_dir[512];
+    char last_playlist_id[64];
 } app_settings;
 
 typedef struct {
     char path[1024];
     char name[256];
     char title_id[64];
+    char game_name[160];
     int64_t size;
     int64_t mtime;
 } clip_entry;
@@ -65,6 +67,7 @@ void plat_local_ip(char *out, size_t len);
 int plat_start_thread(void *(*fn)(void *), void *arg);
 int64_t plat_now_ms(void);
 void plat_sleep_ms(int ms);
+void plat_register_shell_tile(int port);
 
 // ---- utilities (util.c) ----
 typedef struct {
@@ -139,6 +142,8 @@ int yt_upload_chunk(const char *access_token, const char *upload_url, FILE *fp,
                     int *http_status, int *quota_exceeded_out, char *err, size_t errlen);
 int yt_playlist_add(const char *access_token, const char *playlist_id, const char *video_id,
                     int *http_status, char *err, size_t errlen);
+int yt_fetch_playlists(const char *access_token, sbuf *items_json_out, int *http_status,
+                       char *err, size_t errlen);
 
 // ---- clips, folder browser & upload history (clips.c) ----
 void clips_init(void);
@@ -153,6 +158,7 @@ void upload_init(void);
 void upload_shutdown(void);
 void upload_settings_get(app_settings *out);
 int upload_settings_set(const app_settings *in, char *err, size_t errlen);
+void upload_remember_meta(const yt_video_meta *meta);
 int upload_add(const char *path, const yt_video_meta *meta, char *err, size_t errlen);
 void upload_jobs_json(sbuf *out);
 int upload_pause(int id);
@@ -191,3 +197,5 @@ typedef struct {
 const asset *asset_find(const char *name);
 extern const unsigned char cacert_pem[];
 extern const size_t cacert_pem_len;
+extern const unsigned char tile_icon_png[];
+extern const size_t tile_icon_png_len;

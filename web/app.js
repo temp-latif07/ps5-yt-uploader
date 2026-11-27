@@ -141,6 +141,9 @@ const state = {
   status: null,
   clips: [],
   jobs: [],
+  playlists: null,
+  gameFilter: "all",
+  statusFilter: "all",
   pollTimer: 0,
   statusTimer: 0,
   deviceTimer: 0,
@@ -196,9 +199,9 @@ function size(n) {
 function duration(s) {
   if (!isFinite(s) || s < 0) return "";
   s = Math.round(s);
-  if (s < 60) return s + "s";
-  if (s < 3600) return Math.floor(s / 60) + "m " + (s % 60) + "s";
-  return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h > 0) return h + ":" + String(m).padStart(2, "0") + ":" + String(sec).padStart(2, "0");
+  return m + ":" + String(sec).padStart(2, "0");
 }
 function fmtDate(sec) {
   if (!sec) return "";
@@ -209,6 +212,14 @@ function consoleUrl() {
   const s = state.status;
   if (s && s.ip && s.ip !== "127.0.0.1") return "http://" + s.ip + ":" + s.port;
   return location.origin;
+}
+function folderLabel(p) {
+  if (!p) return "PS5 Captures";
+  if (p === "/user/av_contents/video" || p === "/user/av_contents" || p === "/user/av_content/video") return "PS5 Captures";
+  if (p.startsWith("/mnt/usb")) return "USB " + p.slice(8);
+  if (p.startsWith("/mnt/ext")) return "Ext " + p.slice(8);
+  const parts = p.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : p;
 }
 
 async function copyText(txt, okMsg) {
@@ -232,6 +243,92 @@ function stopDeviceFlow() {
   state.deviceFlow = null;
 }
 
+// ---------- throttled 1-at-a-time 16:9 thumbnail generator ----------
+const thumbCache = new Map();
+const thumbQueue = [];
+let thumbBusy = false;
+let thumbObserver = null;
+
+function enqueueThumb(path) {
+  if (thumbCache.has(path) || thumbQueue.includes(path)) return;
+  thumbQueue.push(path);
+  pumpThumbs();
+}
+
+function applyThumbToDom(path) {
+  const info = thumbCache.get(path);
+  if (!info) return;
+  for (const card of document.querySelectorAll("#clips .clip-card")) {
+    if (card.dataset.path !== path) continue;
+    const img = card.querySelector(".thumb-img");
+    const ph = card.querySelector(".thumb-ph");
+    const meta = card.querySelector(".thumb-meta");
+    if (info.url && img) {
+      img.src = info.url;
+      img.classList.remove("hidden");
+      if (ph) ph.classList.add("hidden");
+    }
+    if (info.dur > 0 && meta) {
+      meta.textContent = duration(info.dur) + " · " + size(Number(card.dataset.size || 0));
+    }
+  }
+}
+
+function grabThumb(path) {
+  return new Promise((resolve) => {
+    const v = document.createElement("video");
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = "metadata";
+    let done = false;
+    let dur = 0;
+    const finish = (url) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      v.onloadedmetadata = v.onseeked = v.onerror = null;
+      v.pause();
+      v.removeAttribute("src");
+      try { v.load(); } catch (e) { /* ignore */ }
+      thumbCache.set(path, { url, dur });
+      applyThumbToDom(path);
+      resolve();
+    };
+    const timer = setTimeout(() => finish(""), 6000);
+    v.onloadedmetadata = () => {
+      dur = isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+      const target = dur > 1 ? Math.min(2, dur * 0.15) : 0.1;
+      try { v.currentTime = target; } catch (e) { finish(""); }
+    };
+    v.onseeked = () => {
+      let url = "";
+      try {
+        const w = 320, h = 180;
+        const c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        const ctx = c.getContext("2d");
+        if (ctx && v.videoWidth && v.videoHeight) {
+          ctx.drawImage(v, 0, 0, w, h);
+          url = c.toDataURL("image/jpeg", 0.72);
+        }
+      } catch (e) { /* ignore canvas errors */ }
+      finish(url);
+    };
+    v.onerror = () => finish("");
+    v.src = "/api/stream?path=" + encodeURIComponent(path);
+  });
+}
+
+async function pumpThumbs() {
+  if (thumbBusy) return;
+  thumbBusy = true;
+  while (thumbQueue.length) {
+    const p = thumbQueue.shift();
+    if (!thumbCache.has(p)) await grabThumb(p);
+  }
+  thumbBusy = false;
+}
+
 // ---------- status & OAuth ----------
 async function loadStatus() {
   try {
@@ -250,13 +347,12 @@ function renderStatus() {
   const url = consoleUrl();
   $("#setup-qr").innerHTML = QR.svg(url, 168);
   $("#setup-qr-url").textContent = url;
-  $("#modal-qr").innerHTML = QR.svg(url, 220);
-  $("#modal-qr-url").value = url;
   $("#oauth-file-path").textContent = s.oauth_file || "oauth.txt";
 
   if (!s.logged_in) {
     $("#login").classList.remove("hidden");
     $("#app").classList.add("hidden");
+    $("#tabs").classList.add("hidden");
     clearTimeout(state.pollTimer);
     $("#login-error").textContent = s.auth_error || "";
 
@@ -282,11 +378,14 @@ function renderStatus() {
   state.editingClient = false;
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
+  $("#tabs").classList.remove("hidden");
   const ch = s.channel || {};
   $("#account").textContent = "Signed in as " + (ch.name || "YouTube") + (ch.id ? " (" + ch.id + ")" : "") + " · " + s.mode + " " + s.version;
   $("#set-client-hint").textContent = s.client_id_hint || "";
   if (!$("#folder").value) $("#folder").value = s.captures_dir;
+  $("#browse").textContent = "Folder: " + folderLabel($("#folder").value || s.captures_dir);
   applySettingsForm(s.settings);
+  if (state.playlists === null) loadPlaylists(false);
   showTab(state.tab);
   pollJobs();
 }
@@ -362,12 +461,15 @@ async function pollDeviceFlow(gen) {
   }
 }
 
-$("#btn-qr").addEventListener("click", () => {
-  const url = consoleUrl();
+function openQrModal(url, title, subtitle) {
+  $("#qr-modal-title").textContent = title || "Open on phone or PC";
+  $("#qr-modal-sub").textContent = subtitle || "Scan with your phone camera on the same Wi-Fi network:";
   $("#modal-qr").innerHTML = QR.svg(url, 220);
   $("#modal-qr-url").value = url;
   $("#qr-modal").classList.remove("hidden");
-});
+}
+
+$("#btn-qr").addEventListener("click", () => openQrModal(consoleUrl(), "Open on phone or PC"));
 $("#qr-close").addEventListener("click", () => $("#qr-modal").classList.add("hidden"));
 $("#qr-modal").addEventListener("click", (ev) => { if (ev.target.id === "qr-modal") $("#qr-modal").classList.add("hidden"); });
 $("#modal-qr-copy").addEventListener("click", () => copyText($("#modal-qr-url").value, "URL copied"));
@@ -445,6 +547,7 @@ async function clearClientConfig() {
   try {
     state.status = await api("oauth/config/clear", {});
     state.clips = [];
+    state.playlists = null;
     state.editingClient = false;
     toast("Client ID removed");
     renderStatus();
@@ -459,6 +562,7 @@ $("#logout").addEventListener("click", async () => {
   if (!confirm("Sign out of YouTube? Your Client ID stays saved on the console for quick QR sign-in.")) return;
   await api("logout", {}).catch((e) => toast(e.message));
   state.clips = [];
+  state.playlists = null;
   loadStatus();
 });
 
@@ -470,7 +574,7 @@ $("#quit").addEventListener("click", async () => {
   setConn(false);
 });
 
-// ---------- tabs & clips ----------
+// ---------- tabs & clips gallery ----------
 function showTab(tab) {
   state.tab = tab;
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
@@ -482,12 +586,35 @@ function showTab(tab) {
 }
 document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
 
+function clipGameLabel(c) {
+  return c.game_name || c.title_id || "Other captures";
+}
+
+function updateGameFilter() {
+  const counts = new Map();
+  for (const c of state.clips) {
+    const label = clipGameLabel(c);
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  const sel = $("#game-filter");
+  const cur = state.gameFilter;
+  const opts = [el("option", { value: "all" }, "All games (" + state.clips.length + ")")];
+  for (const [label, cnt] of Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+    opts.push(el("option", { value: label }, label + " (" + cnt + ")"));
+  }
+  sel.replaceChildren(...opts);
+  sel.value = counts.has(cur) ? cur : "all";
+  state.gameFilter = sel.value;
+}
+
 async function loadClips() {
   const dir = $("#folder").value.trim();
-  $("#clips-status").textContent = "Scanning clips...";
+  $("#browse").textContent = "Folder: " + folderLabel(dir || (state.status && state.status.captures_dir));
+  $("#clips-status").textContent = "Scanning captures...";
   try {
     const r = await api("clips" + (dir ? "?dir=" + encodeURIComponent(dir) : ""));
     state.clips = Array.isArray(r.clips) ? r.clips : [];
+    updateGameFilter();
     renderClips();
   } catch (e) {
     $("#clips-status").textContent = "Could not load clips: " + e.message;
@@ -497,53 +624,214 @@ async function loadClips() {
 
 $("#refresh").addEventListener("click", loadClips);
 $("#filter").addEventListener("input", renderClips);
+$("#game-filter").addEventListener("change", () => {
+  state.gameFilter = $("#game-filter").value;
+  renderClips();
+});
+document.querySelectorAll("#status-filter button").forEach((b) => {
+  b.addEventListener("click", () => {
+    state.statusFilter = b.dataset.status;
+    document.querySelectorAll("#status-filter button").forEach((x) => x.classList.toggle("active", x === b));
+    renderClips();
+  });
+});
 
 function renderClips() {
   const q = $("#filter").value.trim().toLowerCase();
-  const shown = q ? state.clips.filter((c) => (c.name + " " + c.title_id).toLowerCase().includes(q)) : state.clips;
+  const shown = state.clips.filter((c) => {
+    if (state.gameFilter !== "all" && clipGameLabel(c) !== state.gameFilter) return false;
+    if (state.statusFilter === "pending" && c.video_id) return false;
+    if (state.statusFilter === "uploaded" && !c.video_id) return false;
+    if (q) {
+      const hay = (c.name + " " + c.title_id + " " + (c.game_name || "")).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
   $("#clips-status").textContent = state.clips.length
     ? (shown.length === state.clips.length ? state.clips.length + " clip(s)" : shown.length + " of " + state.clips.length + " clips")
     : "No .mp4 or .webm clips found in this folder.";
-  $("#clips").replaceChildren(...shown.map((c) => el("div", { class: "item" },
-    el("div", { class: "item-name" }, c.name),
-    el("div", { class: "meta" },
-      c.title_id ? el("span", { class: "tag" }, c.title_id) : null,
-      el("span", {}, size(c.size)),
-      c.mtime ? el("span", {}, fmtDate(c.mtime)) : null,
-      c.video_id ? el("a", { class: "yt-link", href: "https://youtu.be/" + c.video_id, target: "_blank", rel: "noopener" },
-        "Uploaded (" + c.video_id + ")") : null),
-    el("div", { class: "actions" },
-      el("button", { class: "small", type: "button", onclick: () => openPreview(c) }, "Preview"),
-      el("button", { class: "small primary", type: "button", onclick: () => openUpload(c) }, c.video_id ? "Upload again" : "Upload")))));
+
+  if (thumbObserver) {
+    thumbObserver.disconnect();
+  } else if ("IntersectionObserver" in window) {
+    thumbObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          thumbObserver.unobserve(entry.target);
+          enqueueThumb(entry.target.dataset.path);
+        }
+      }
+    }, { rootMargin: "240px" });
+  }
+
+  const cards = shown.map((c) => {
+    const cached = thumbCache.get(c.path);
+    const label = c.game_name || c.title_id || "";
+    const durText = (cached && cached.dur > 0) ? duration(cached.dur) + " · " + size(c.size) : size(c.size);
+    const card = el("div", { class: "clip-card", role: "button", tabindex: "0", "data-path": c.path, "data-size": String(c.size || 0) },
+      el("div", { class: "thumb" },
+        el("img", { class: cached && cached.url ? "thumb-img" : "thumb-img hidden", src: (cached && cached.url) || "", alt: "" }),
+        el("div", { class: cached && cached.url ? "thumb-ph hidden" : "thumb-ph" }, label || "VIDEO"),
+        label ? el("span", { class: "thumb-game" }, label) : null,
+        c.video_id ? el("span", { class: "thumb-done" }, "Uploaded") : null,
+        el("span", { class: "thumb-meta" }, durText)),
+      el("div", { class: "clip-body" },
+        el("div", { class: "clip-title", title: c.name }, c.name),
+        el("div", { class: "clip-sub" },
+          el("span", {}, c.mtime ? fmtDate(c.mtime) : ""),
+          c.video_id
+            ? el("a", { class: "yt-link", href: "https://youtu.be/" + c.video_id, target: "_blank", rel: "noopener" }, c.video_id)
+            : el("span", {}, c.title_id || ""))));
+    card.addEventListener("click", (ev) => {
+      if (ev.target.closest("a")) return;
+      openUpload(c);
+    });
+    card.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        openUpload(c);
+      }
+    });
+    return card;
+  });
+
+  $("#clips").replaceChildren(...cards);
+  for (const card of cards) {
+    if (thumbCache.has(card.dataset.path)) continue;
+    if (thumbObserver) thumbObserver.observe(card);
+    else enqueueThumb(card.dataset.path);
+  }
 }
 
-// ---------- upload modal ----------
+// ---------- YouTube playlists ----------
+function populatePlaylistSelect(selectedId) {
+  const sel = $("#up-playlist-select");
+  const custom = $("#up-playlist-custom");
+  const list = Array.isArray(state.playlists) ? state.playlists : [];
+  const opts = [el("option", { value: "" }, "None")];
+  let matched = !selectedId;
+  for (const pl of list) {
+    if (pl.id === selectedId) matched = true;
+    opts.push(el("option", { value: pl.id }, pl.title + " (" + pl.count + ")"));
+  }
+  opts.push(el("option", { value: "__custom__" }, "Enter custom playlist ID..."));
+  sel.replaceChildren(...opts);
+
+  if (!selectedId) {
+    sel.value = "";
+    custom.value = "";
+    custom.classList.add("hidden");
+  } else if (matched) {
+    sel.value = selectedId;
+    custom.value = "";
+    custom.classList.add("hidden");
+  } else {
+    sel.value = "__custom__";
+    custom.value = selectedId;
+    custom.classList.remove("hidden");
+  }
+}
+
+async function loadPlaylists(force) {
+  const stEl = $("#up-playlist-status");
+  if (stEl) {
+    stEl.textContent = "Loading your playlists...";
+    stEl.classList.remove("hidden");
+  }
+  try {
+    const r = await api("playlists" + (force ? "?refresh=1" : ""));
+    state.playlists = Array.isArray(r.playlists) ? r.playlists : [];
+    const curVal = currentPlaylistValue();
+    const defVal = curVal || ((state.status && state.status.settings && state.status.settings.last_playlist_id) || "");
+    populatePlaylistSelect(defVal);
+    if (stEl) {
+      if (state.playlists.length) stEl.classList.add("hidden");
+      else { stEl.textContent = "No playlists found on this channel."; stEl.classList.remove("hidden"); }
+    }
+  } catch (e) {
+    state.playlists = state.playlists || [];
+    if (stEl) {
+      stEl.textContent = "Could not load playlists: " + e.message;
+      stEl.classList.remove("hidden");
+    }
+  }
+}
+
+function currentPlaylistValue() {
+  if ($("#up-mfk").value === "1") return "";
+  const sel = $("#up-playlist-select").value;
+  if (sel === "__custom__") return $("#up-playlist-custom").value.trim();
+  return sel;
+}
+
+$("#up-playlist-select").addEventListener("change", () => {
+  const isCustom = $("#up-playlist-select").value === "__custom__";
+  $("#up-playlist-custom").classList.toggle("hidden", !isCustom);
+  if (isCustom) $("#up-playlist-custom").focus();
+});
+$("#refresh-playlists").addEventListener("click", () => loadPlaylists(true));
+
+// ---------- unified viewer + upload modal ----------
 function openUpload(c) {
   const st = (state.status && state.status.settings) || {};
   $("#up-path").value = c.path;
-  $("#up-clip-info").textContent = c.name + " · " + size(c.size) + (c.title_id ? " · " + c.title_id : "");
+  const gname = c.game_name || c.title_id || "";
+  $("#up-clip-info").textContent = (gname ? gname + " · " : "") + size(c.size) + (c.mtime ? " · " + fmtDate(c.mtime) : "");
+
+  const ytLink = $("#up-prev-yt");
+  if (c.video_id) {
+    ytLink.href = "https://youtu.be/" + c.video_id;
+    ytLink.textContent = "Uploaded (" + c.video_id + ")";
+    ytLink.classList.remove("hidden");
+  } else {
+    ytLink.classList.add("hidden");
+  }
+
+  const v = $("#up-video");
+  v.src = "/api/stream?path=" + encodeURIComponent(c.path);
+
   const baseTitle = c.name.replace(/\.[^.]+$/, "");
-  $("#up-title").value = c.title_id ? c.title_id + " - " + baseTitle : baseTitle;
-  $("#up-desc").value = "Recorded on PlayStation 5" + (c.title_id ? " (" + c.title_id + ")" : "");
+  const datePart = c.mtime ? fmtDate(c.mtime).slice(0, 10) : baseTitle;
+  $("#up-title").value = c.game_name ? c.game_name + " — " + datePart : (c.title_id ? c.title_id + " - " + baseTitle : baseTitle);
+  $("#up-desc").value = "Recorded on PlayStation 5" + (gname ? " — " + gname : "");
   $("#up-privacy").value = st.default_privacy || "UNLISTED";
   $("#up-mfk").value = st.made_for_kids ? "1" : "0";
-  $("#up-playlist").value = "";
   $("#up-error").textContent = "";
+
+  populatePlaylistSelect(st.made_for_kids ? "" : (st.last_playlist_id || ""));
+  if (state.playlists === null) loadPlaylists(false);
   syncMfkUi();
+
   $("#upload-modal").classList.remove("hidden");
   $("#up-title").focus();
 }
 
+function closeUploadModal() {
+  const v = $("#up-video");
+  v.pause();
+  v.removeAttribute("src");
+  try { v.load(); } catch (e) { /* ignore */ }
+  $("#upload-modal").classList.add("hidden");
+}
+
 function syncMfkUi() {
   const mfk = $("#up-mfk").value === "1";
-  $("#up-playlist").disabled = mfk;
-  if (mfk) $("#up-playlist").value = "";
+  $("#up-playlist-select").disabled = mfk;
+  $("#up-playlist-custom").disabled = mfk;
+  $("#refresh-playlists").disabled = mfk;
+  if (mfk) {
+    $("#up-playlist-select").value = "";
+    $("#up-playlist-custom").value = "";
+    $("#up-playlist-custom").classList.add("hidden");
+  }
   $("#up-mfk-note").classList.toggle("hidden", !mfk);
 }
 $("#up-mfk").addEventListener("change", syncMfkUi);
-$("#up-close").addEventListener("click", () => $("#upload-modal").classList.add("hidden"));
-$("#up-cancel").addEventListener("click", () => $("#upload-modal").classList.add("hidden"));
-$("#upload-modal").addEventListener("click", (ev) => { if (ev.target.id === "upload-modal") $("#upload-modal").classList.add("hidden"); });
+$("#up-close").addEventListener("click", closeUploadModal);
+$("#up-cancel").addEventListener("click", closeUploadModal);
+$("#upload-modal").addEventListener("click", (ev) => { if (ev.target.id === "upload-modal") closeUploadModal(); });
 
 $("#upload-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
@@ -551,50 +839,52 @@ $("#upload-form").addEventListener("submit", async (ev) => {
   $("#up-error").textContent = "";
   btn.disabled = true; btn.textContent = "Queuing...";
   try {
-    await api("upload", {
+    const r = await api("upload", {
       path: $("#up-path").value,
       title: $("#up-title").value.trim(),
       description: $("#up-desc").value,
       privacy: $("#up-privacy").value,
       made_for_kids: $("#up-mfk").value,
-      playlist_id: $("#up-playlist").value.trim(),
+      playlist_id: currentPlaylistValue(),
     });
-    $("#upload-modal").classList.add("hidden");
+    if (r.settings && state.status && state.status.settings) {
+      Object.assign(state.status.settings, r.settings);
+      applySettingsForm(state.status.settings);
+    }
+    closeUploadModal();
     toast("Queued upload");
     pollJobs();
     showTab("uploads");
   } catch (e) {
     $("#up-error").textContent = e.message;
   } finally {
-    btn.disabled = false; btn.textContent = "Queue upload";
+    btn.disabled = false; btn.textContent = "Upload to YouTube";
   }
 });
 
-// ---------- video preview ----------
-function openPreview(c) {
-  $("#prev-title").textContent = c.name;
-  $("#prev-meta").textContent = (c.title_id ? c.title_id + " · " : "") + size(c.size);
-  $("#prev-video").src = "/api/stream?path=" + encodeURIComponent(c.path);
-  $("#preview-modal").classList.remove("hidden");
-}
-function closePreview() {
-  const v = $("#prev-video");
-  v.pause();
-  v.removeAttribute("src");
-  v.load();
-  $("#preview-modal").classList.add("hidden");
-}
-$("#prev-close").addEventListener("click", closePreview);
-$("#preview-modal").addEventListener("click", (ev) => { if (ev.target.id === "preview-modal") closePreview(); });
-
-// ---------- uploads queue ----------
-function updateBadge() {
-  const active = state.jobs.filter((j) => ["queued", "starting", "uploading", "finalizing"].includes(j.state)).length;
+// ---------- uploads queue & active strip ----------
+function updateBadgeAndStrip() {
+  const activeJobs = state.jobs.filter((j) => ["queued", "starting", "uploading", "finalizing"].includes(j.state));
   const b = $("#badge");
-  b.textContent = active;
-  b.classList.toggle("hidden", !active);
-  return active;
+  b.textContent = activeJobs.length;
+  b.classList.toggle("hidden", !activeJobs.length);
+
+  const strip = $("#active-strip");
+  if (!activeJobs.length) {
+    strip.classList.add("hidden");
+  } else {
+    const cur = activeJobs.find((j) => j.state === "uploading") || activeJobs[0];
+    const pct = cur.total > 0 ? Math.min(100, (cur.done / cur.total) * 100) : 0;
+    const speedTxt = cur.speed > 0 ? " · " + size(cur.speed) + "/s · " + duration((cur.total - cur.done) / cur.speed) + " left" : "";
+    $("#active-strip-text").textContent =
+      (activeJobs.length > 1 ? activeJobs.length + " uploads active · " : "Uploading ") +
+      (cur.title || cur.name) + " (" + pct.toFixed(1) + "%" + speedTxt + ")";
+    $("#active-strip-pct").style.width = pct.toFixed(1) + "%";
+    strip.classList.remove("hidden");
+  }
+  return activeJobs.length;
 }
+$("#active-strip-open").addEventListener("click", () => showTab("uploads"));
 
 async function pollJobs() {
   clearTimeout(state.pollTimer);
@@ -603,7 +893,7 @@ async function pollJobs() {
     const r = await api("jobs");
     state.jobs = r.jobs || [];
   } catch (e) { /* retry below */ }
-  const active = updateBadge();
+  const active = updateBadgeAndStrip();
   if (state.tab === "uploads") renderJobs();
   state.pollTimer = setTimeout(pollJobs, state.tab === "uploads" || active ? 1000 : 5000);
 }
@@ -641,6 +931,8 @@ function renderJobs() {
       j.err ? el("div", { class: "error small" }, j.err) : null,
       j.note ? el("div", { class: "muted small" }, j.note) : null,
       el("div", { class: "actions" },
+        j.url ? el("button", { class: "small", type: "button", onclick: () => copyText(j.url, "YouTube link copied") }, "Copy link") : null,
+        j.url ? el("button", { class: "small", type: "button", onclick: () => openQrModal(j.url, "Share uploaded video", "Scan to open this clip on your phone:") }, "Share QR") : null,
         canPause ? el("button", { class: "small", type: "button", onclick: () => jobAction("pause", j.id) }, "Pause") : null,
         canResume ? el("button", { class: "small primary", type: "button", onclick: () => jobAction("resume", j.id) }, j.state === "failed" ? "Retry" : "Resume") : null,
         canCancel ? el("button", { class: "small danger", type: "button", onclick: () => jobAction("cancel", j.id) }, "Cancel") : null,
@@ -661,6 +953,7 @@ $("#settings-form").addEventListener("submit", async (ev) => {
       auto_upload: $("#set-auto").checked ? "1" : "0",
     });
     $("#folder").value = state.status.captures_dir;
+    $("#browse").textContent = "Folder: " + folderLabel(state.status.captures_dir);
     applySettingsForm(state.status.settings);
     toast("Settings saved");
   } catch (e) {
@@ -707,9 +1000,7 @@ async function browse(path, quiet) {
   $("#picker-path").textContent = r.path;
   $("#picker-up").disabled = !r.parent;
   $("#picker-free").textContent = r.free !== undefined ? size(r.free) + " free" : "";
-  $("#picker-roots").replaceChildren(...r.roots.map((root) => el("button", { type: "button", onclick: () => browse(root) },
-    root.startsWith("/mnt/usb") ? "USB " + root.slice(8) : root.startsWith("/mnt/ext") ? "Ext " + root.slice(8) :
-    (root === "/user/av_contents/video" || root === "/user/av_contents" || root === "/user/av_content/video") ? "PS5 Captures" : root)));
+  $("#picker-roots").replaceChildren(...r.roots.map((root) => el("button", { type: "button", onclick: () => browse(root) }, folderLabel(root))));
   const items = r.dirs.map((d) => el("li", { onclick: () => browse(r.path.replace(/\/$/, "") + "/" + d) }, d + "/"));
   const files = (r.files || []).map((f) => el("li", { class: "file" }, el("span", {}, f.name), el("span", {}, size(f.size))));
   $("#picker-dirs").replaceChildren(...(items.length || files.length ? items.concat(files) : [el("li", { class: "empty" }, "Empty folder")]));

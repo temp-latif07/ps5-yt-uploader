@@ -5,8 +5,9 @@ Browse your PlayStation 5 gameplay clips (`/user/av_contents/video`, `/data`, an
 - **BYO Google Cloud OAuth 2.0 + QR Device Sign-In:**
   - Create your own free Google Cloud OAuth 2.0 client (*TVs and Limited Input devices*) so every user gets their own quota without depending on a shared central project.
   - Upload your `client_secret_*.json` (or scan the **Phone QR** code to import it from your phone/PC), then scan the **Google Device QR code** (`google.com/device`) and enter the on-screen code.
-- **Clip Browser & Range Video Preview:** Scans `/user/av_contents/video` (plus `/data` and mounted `/mnt/usbN` / `/mnt/extN` drives), groups by Game Title ID, marks already-uploaded clips with clickable `youtu.be` links, and previews videos in-browser before uploading.
-- **Manual Curation & Resumable Background Queue:** Edit Title, Description, Privacy (*Unlisted*, *Public*, *Private*), Audience (*Made for Kids*), and optional Playlist ID. Uploads stream directly from disk via YouTube Data API v3 resumable sessions (`308 Resume Incomplete`) with live progress, speed, ETA, Pause, Resume, Retry, and Cancel — surviving network drops and console restarts.
+- **PS5 Media Gallery UI & Range Video Preview:** Full-viewport 16:9 thumbnail grid with real game names from PS5 capture metadata, game & upload-status filters, live active-upload strip, and a unified **Clip Viewer & Upload** modal.
+- **Live Playlists & Sticky Upload Defaults:** Pulls your YouTube playlists into a dropdown selector, remembers your last-used Privacy, Made for Kids, and Playlist settings across uploads, and streams directly from disk via YouTube Data API v3 (`308 Resume Incomplete`) — surviving network drops and console restarts.
+- **Self-Registering Home Tile + `.exfat` Launcher:** Running `ps5-yt-uploader.elf` automatically registers a home-screen shortcut (`YTUP08085`, FW < 12.00) via `libSceAppInstUtil`, or use the standalone `PPSA97631` `.exfat` launcher image.
 - **Optional Auto-Upload (Off by Default):** Enable in Settings to automatically upload *new* clips saved after turning it on (pre-existing clips are never backfilled).
 
 ---

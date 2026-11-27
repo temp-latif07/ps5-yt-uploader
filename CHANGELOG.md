@@ -10,6 +10,18 @@ Planned improvements and upcoming fixes.
 
 ---
 
+## 2.1.0
+
+**New**
+- **Full-Viewport PS5 Media Gallery UI:** Redesigned the dashboard into a dark edge-to-edge Media Gallery grid with lazy 16:9 video thumbnails and durations, game filter dropdown, upload-status filter (`All` / `Not uploaded` / `Uploaded`), controller-friendly focus highlights, a live active-upload banner, and a unified side-by-side **Clip Viewer & Upload** studio modal.
+- **Real PS5 Game Titles:** Reads PS5 `.dat` sidecar headers (and `/user/appmeta/<TitleID>/param.json` fallback) to display actual game names instead of raw Title IDs.
+- **Live YouTube Playlists Dropdown:** Fetches your channel's playlists (`GET /api/playlists`) with a one-click refresh button so you can add clips to an existing playlist without memorizing playlist IDs.
+- **Sticky Last-Used Upload Settings:** Automatically remembers your last-used Privacy (`Public` / `Unlisted` / `Private`), Made for Kids selection, and Playlist ID across clips and console restarts.
+- **Self-Registering `.elf` Home-Screen Tile + `.exfat` Tile:** Loading `ps5-yt-uploader.elf` directly (e.g. via PS5 Payload Manager) now stages `/user/app/YTUP08085` and registers a home-screen shortcut automatically via `libSceAppInstUtil`, alongside the standalone `PPSA97631` `.exfat` launcher image.
+- **Share QR & Copy Link:** Completed uploads now include **Copy link** and **Share QR** buttons to open `youtu.be/<id>` on your phone.
+
+---
+
 ## 2.0.2
 
 **Fixes**

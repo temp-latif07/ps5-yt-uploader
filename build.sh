@@ -41,7 +41,8 @@ gen_assets() {
     local ca
     ca=$(find_ca)
     mkdir -p "$out/gen"
-    python3 -I "$here/tools/embed.py" "$here/web" "$ca" "$out/gen/assets.c"
+    python3 -I "$here/title/make_icon.py" "$out/gen/icon0.png"
+    python3 -I "$here/tools/embed.py" "$here/web" "$ca" "$out/gen/assets.c" "$out/gen/icon0.png"
 }
 
 ensure_docker_image() {

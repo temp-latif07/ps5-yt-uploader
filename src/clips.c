@@ -151,7 +151,7 @@ static int cmp_clips_desc(const void *a, const void *b) {
 }
 
 static int push_clip(clip_entry **arr, int *n, int *cap, const char *full, const char *name,
-                     const char *title_id, const struct stat *st) {
+                     const char *title_id, const char *game_name, const struct stat *st) {
     if (*n == *cap) {
         int nc = *cap ? *cap * 2 : 32;
         clip_entry *na = realloc(*arr, (size_t)nc * sizeof *na);
@@ -163,9 +163,85 @@ static int push_clip(clip_entry **arr, int *n, int *cap, const char *full, const
     snprintf(c->path, sizeof c->path, "%s", full);
     snprintf(c->name, sizeof c->name, "%s", name);
     snprintf(c->title_id, sizeof c->title_id, "%s", title_id ? title_id : "");
+    snprintf(c->game_name, sizeof c->game_name, "%s", game_name ? game_name : "");
     c->size = (int64_t)st->st_size;
     c->mtime = (int64_t)st->st_mtime;
     return 0;
+}
+
+typedef struct {
+    char tid[64];
+    char name[160];
+} title_map_entry;
+
+static int read_dat_game_name(const char *dat_path, char *out, size_t len) {
+    if (!dat_path || !out || !len) return 0;
+    out[0] = 0;
+    FILE *f = fopen(dat_path, "rb");
+    if (!f) return 0;
+    char raw[256];
+    memset(raw, 0, sizeof raw);
+    int ok = (fseek(f, 0x44L, SEEK_SET) == 0 && fread(raw, 1, sizeof raw - 1, f) > 0);
+    fclose(f);
+    if (!ok || !raw[0]) return 0;
+    raw[sizeof raw - 1] = 0;
+    for (unsigned char *p = (unsigned char *)raw; *p; p++)
+        if (*p < 0x20 || *p == 0x7f) *p = ' ';
+    str_trim(raw);
+    char *us = strrchr(raw, '_');
+    if (us && strlen(us + 1) == 14) {
+        int digits = 1;
+        for (const char *q = us + 1; *q; q++)
+            if (*q < '0' || *q > '9') { digits = 0; break; }
+        if (digits) *us = 0;
+    }
+    str_trim(raw);
+    if (!raw[0]) return 0;
+    snprintf(out, len, "%s", raw);
+    return 1;
+}
+
+#ifdef __PROSPERO__
+static int read_appmeta_game_name(const char *tid, char *out, size_t len) {
+    if (!tid || !tid[0] || !out || !len) return 0;
+    out[0] = 0;
+    char p[256];
+    snprintf(p, sizeof p, "/user/appmeta/%s/param.json", tid);
+    FILE *f = fopen(p, "rb");
+    if (!f) return 0;
+    char *buf = malloc(16384);
+    if (!buf) {
+        fclose(f);
+        return 0;
+    }
+    size_t n = fread(buf, 1, 16383, f);
+    fclose(f);
+    buf[n] = 0;
+    const char *v = json_find(buf, "titleName");
+    if (!v) {
+        const char *lp = json_find(buf, "localizedParameters");
+        const char *en = json_find(lp, "en-US");
+        v = json_find(en, "titleName");
+    }
+    int ok = (v && json_string(v, out, len) == 0 && out[0] != 0);
+    free(buf);
+    return ok;
+}
+#endif
+
+static const char *title_cache_lookup(const title_map_entry *map, int nmap, const char *tid) {
+    if (!tid || !tid[0]) return NULL;
+    for (int i = 0; i < nmap; i++)
+        if (!strcmp(map[i].tid, tid)) return map[i].name;
+    return NULL;
+}
+
+static void title_cache_put(title_map_entry *map, int *nmap, int max_map, const char *tid, const char *name) {
+    if (!tid || !tid[0] || !name || !name[0] || *nmap >= max_map) return;
+    if (title_cache_lookup(map, *nmap, tid)) return;
+    snprintf(map[*nmap].tid, sizeof map[*nmap].tid, "%s", tid);
+    snprintf(map[*nmap].name, sizeof map[*nmap].name, "%s", name);
+    (*nmap)++;
 }
 
 static int is_game_title_id(const char *name) {
@@ -177,11 +253,49 @@ static int is_game_title_id(const char *name) {
     return 1;
 }
 
+static void resolve_clip_game_name(const char *dir, const char *clip_name, const char *tid,
+                                   const char *dir_dat_name, title_map_entry *map, int *nmap, int max_map,
+                                   char *out, size_t len) {
+    out[0] = 0;
+    const char *dot = strrchr(clip_name, '.');
+    if (dot && dot > clip_name) {
+        size_t stem = (size_t)(dot - clip_name);
+        if (stem + 5 < 256) {
+            char dat_path[1280];
+            snprintf(dat_path, sizeof dat_path, "%s/%.*s.dat", dir, (int)stem, clip_name);
+            if (read_dat_game_name(dat_path, out, len)) {
+                title_cache_put(map, nmap, max_map, tid, out);
+                return;
+            }
+        }
+    }
+    if (dir_dat_name && dir_dat_name[0]) {
+        snprintf(out, len, "%s", dir_dat_name);
+        title_cache_put(map, nmap, max_map, tid, out);
+        return;
+    }
+    const char *cached = title_cache_lookup(map, *nmap, tid);
+    if (cached) {
+        snprintf(out, len, "%s", cached);
+        return;
+    }
+#ifdef __PROSPERO__
+    if (tid && tid[0] && read_appmeta_game_name(tid, out, len)) {
+        title_cache_put(map, nmap, max_map, tid, out);
+        return;
+    }
+#endif
+}
+
 static void scan_dir_rec(const char *dir, int depth, const char *inherited_tid,
-                         clip_entry **arr, int *n, int *cap) {
+                         clip_entry **arr, int *n, int *cap,
+                         title_map_entry *map, int *nmap, int max_map) {
     if (depth > 5 || *n >= 2000) return;
     DIR *d = opendir(dir);
     if (!d) return;
+
+    char dir_dat_name[160] = "";
+    int start_idx = *n;
     struct dirent *e;
     while ((e = readdir(d)) && *n < 2000) {
         if (e->d_name[0] == '.') continue;
@@ -199,12 +313,32 @@ static void scan_dir_rec(const char *dir, int depth, const char *inherited_tid,
                      strcasecmp(e->d_name, "av_content") != 0) {
                 next_tid = e->d_name;
             }
-            scan_dir_rec(sub, depth + 1, next_tid, arr, n, cap);
-        } else if (S_ISREG(st.st_mode) && is_video_filename(e->d_name)) {
-            push_clip(arr, n, cap, sub, e->d_name, inherited_tid, &st);
+            scan_dir_rec(sub, depth + 1, next_tid, arr, n, cap, map, nmap, max_map);
+        } else if (S_ISREG(st.st_mode)) {
+            size_t nl = strlen(e->d_name);
+            if (!dir_dat_name[0] && nl > 4 && !strcasecmp(e->d_name + nl - 4, ".dat")) {
+                read_dat_game_name(sub, dir_dat_name, sizeof dir_dat_name);
+                title_cache_put(map, nmap, max_map, inherited_tid, dir_dat_name);
+            } else if (is_video_filename(e->d_name)) {
+                char gname[160];
+                resolve_clip_game_name(dir, e->d_name, inherited_tid, dir_dat_name,
+                                       map, nmap, max_map, gname, sizeof gname);
+                push_clip(arr, n, cap, sub, e->d_name, inherited_tid, gname, &st);
+            }
         }
     }
     closedir(d);
+
+    for (int i = start_idx; i < *n; i++) {
+        if (!(*arr)[i].game_name[0]) {
+            if (dir_dat_name[0] && !strncmp((*arr)[i].path, dir, strlen(dir))) {
+                snprintf((*arr)[i].game_name, sizeof (*arr)[i].game_name, "%s", dir_dat_name);
+            } else {
+                const char *cached = title_cache_lookup(map, *nmap, (*arr)[i].title_id);
+                if (cached) snprintf((*arr)[i].game_name, sizeof (*arr)[i].game_name, "%s", cached);
+            }
+        }
+    }
 }
 
 int clips_scan_array(const char *dir, clip_entry **out, int *count_out) {
@@ -216,9 +350,12 @@ int clips_scan_array(const char *dir, clip_entry **out, int *count_out) {
     if (!d) return errno == ENOENT ? 0 : -1;
     closedir(d);
 
+    title_map_entry *map = calloc(128, sizeof *map);
+    int nmap = 0;
     clip_entry *arr = NULL;
     int n = 0, cap = 0;
-    scan_dir_rec(dir, 0, "", &arr, &n, &cap);
+    scan_dir_rec(dir, 0, "", &arr, &n, &cap, map, &nmap, map ? 128 : 0);
+    free(map);
 
     if (n > 1) qsort(arr, (size_t)n, sizeof *arr, cmp_clips_desc);
     *out = arr;
@@ -253,6 +390,8 @@ int clips_scan_json(const char *dir, sbuf *out, char *err, size_t errlen) {
         sb_json_str(out, arr[i].name);
         sb_puts(out, ",\"title_id\":");
         sb_json_str(out, arr[i].title_id);
+        sb_puts(out, ",\"game_name\":");
+        sb_json_str(out, arr[i].game_name);
         sb_printf(out, ",\"size\":%lld,\"mtime\":%lld,\"video_id\":", (long long)arr[i].size, (long long)arr[i].mtime);
         if (up && vid[0]) sb_json_str(out, vid);
         else sb_puts(out, "null");

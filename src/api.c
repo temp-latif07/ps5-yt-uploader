@@ -17,6 +17,17 @@ static int g_flow_polling;
 static char g_flow_state[32];
 static char g_flow_err[300];
 
+static pthread_mutex_t g_pl_lock = PTHREAD_MUTEX_INITIALIZER;
+static sbuf g_pl_json;
+static int64_t g_pl_cached_ms;
+
+static void clear_playlists_cache(void) {
+    pthread_mutex_lock(&g_pl_lock);
+    sb_free(&g_pl_json);
+    g_pl_cached_ms = 0;
+    pthread_mutex_unlock(&g_pl_lock);
+}
+
 static void clear_device_flow(void) {
     pthread_mutex_lock(&g_flow_lock);
     g_flow_seq++;
@@ -138,6 +149,8 @@ static void route_status(http_req *r) {
               (long long)st.auto_upload_since,
               st.chunk_mb, st.parallel);
     sb_json_str(&b, st.captures_dir);
+    sb_puts(&b, ",\"last_playlist_id\":");
+    sb_json_str(&b, st.last_playlist_id);
     sb_puts(&b, "}}");
 
     memset(&o, 0, sizeof o);
@@ -176,6 +189,7 @@ static void route_oauth_config(http_req *r) {
 
     net_token_cache_clear();
     clear_device_flow();
+    clear_playlists_cache();
     if (net_oauth_set(&o) != 0) {
         memset(&o, 0, sizeof o);
         json_err(r->fd, 500, "could not save OAuth Client ID on console");
@@ -191,6 +205,7 @@ static void route_oauth_config(http_req *r) {
 
 static void route_oauth_config_clear(http_req *r) {
     clear_device_flow();
+    clear_playlists_cache();
     net_oauth_clear_all();
     plat_log("oauth: cleared stored Client ID and tokens");
     route_status(r);
@@ -402,9 +417,80 @@ static void route_oauth_poll(http_req *r) {
 
 static void route_logout(http_req *r) {
     clear_device_flow();
+    clear_playlists_cache();
     net_oauth_clear_tokens();
     plat_log("logout: cleared stored YouTube sign-in tokens (Client ID preserved)");
     json_ok(r->fd);
+}
+
+static void route_playlists(http_req *r) {
+    if (!net_oauth_is_logged_in()) {
+        json_err(r->fd, 401, "not signed in — scan QR to sign in to YouTube first");
+        return;
+    }
+
+    char ref_s[16] = "";
+    form_get(r->query, "refresh", ref_s, sizeof ref_s);
+    int force = parse_bool_str(ref_s, 0);
+
+    if (!force) {
+        pthread_mutex_lock(&g_pl_lock);
+        if (g_pl_json.data && g_pl_cached_ms > 0 && plat_now_ms() - g_pl_cached_ms < 300000) {
+            sbuf b;
+            sb_init(&b);
+            sb_puts(&b, "{\"ok\":true,\"playlists\":");
+            sb_puts(&b, g_pl_json.data);
+            sb_puts(&b, "}");
+            pthread_mutex_unlock(&g_pl_lock);
+            http_send_json(r->fd, 200, &b);
+            sb_free(&b);
+            return;
+        }
+        pthread_mutex_unlock(&g_pl_lock);
+    }
+
+    char tok[2048] = "", err[300] = "";
+    int inv = 0;
+    if (net_token_cache_get(tok, sizeof tok) != 0 &&
+        yt_oauth_refresh(tok, sizeof tok, &inv, err, sizeof err) != 0) {
+        memset(tok, 0, sizeof tok);
+        json_err(r->fd, inv ? 401 : 502, err[0] ? err : "failed to get YouTube access token");
+        return;
+    }
+
+    sbuf items;
+    sb_init(&items);
+    int http_st = 0;
+    int rc = yt_fetch_playlists(tok, &items, &http_st, err, sizeof err);
+    if (rc != 0 && http_st == 401) {
+        sb_free(&items);
+        net_token_cache_clear();
+        if (yt_oauth_refresh(tok, sizeof tok, &inv, err, sizeof err) == 0) {
+            sb_init(&items);
+            rc = yt_fetch_playlists(tok, &items, &http_st, err, sizeof err);
+        }
+    }
+    memset(tok, 0, sizeof tok);
+
+    if (rc != 0) {
+        sb_free(&items);
+        json_err(r->fd, http_st == 401 ? 401 : 502, err[0] ? err : "failed to load playlists");
+        return;
+    }
+
+    pthread_mutex_lock(&g_pl_lock);
+    sb_free(&g_pl_json);
+    g_pl_json = items;
+    g_pl_cached_ms = plat_now_ms();
+    sbuf b;
+    sb_init(&b);
+    sb_puts(&b, "{\"ok\":true,\"playlists\":");
+    sb_puts(&b, g_pl_json.data ? g_pl_json.data : "[]");
+    sb_puts(&b, "}");
+    pthread_mutex_unlock(&g_pl_lock);
+
+    http_send_json(r->fd, 200, &b);
+    sb_free(&b);
 }
 
 static void route_clips(http_req *r) {
@@ -572,9 +658,18 @@ static void route_upload(http_req *r) {
         json_err(r->fd, 400, err);
         return;
     }
+    upload_remember_meta(&meta);
+    app_settings st;
+    upload_settings_get(&st);
+
     sbuf b;
     sb_init(&b);
-    sb_printf(&b, "{\"ok\":true,\"id\":%d}", jid);
+    sb_printf(&b, "{\"ok\":true,\"id\":%d,\"settings\":{\"default_privacy\":", jid);
+    sb_json_str(&b, st.default_privacy);
+    sb_printf(&b, ",\"made_for_kids\":%s,\"last_playlist_id\":",
+              st.made_for_kids ? "true" : "false");
+    sb_json_str(&b, st.last_playlist_id);
+    sb_puts(&b, "}}");
     http_send_json(r->fd, 200, &b);
     sb_free(&b);
 }
@@ -659,6 +754,7 @@ void api_handle(http_req *r) {
     else if (get && !strcmp(p, "dirs")) route_dirs(r);
     else if (get && !strcmp(p, "stream")) route_stream(r);
     else if (get && !strcmp(p, "jobs")) route_jobs(r);
+    else if (get && !strcmp(p, "playlists")) route_playlists(r);
     else if (post && !strcmp(p, "oauth/config")) route_oauth_config(r);
     else if (post && !strcmp(p, "oauth/config/clear")) route_oauth_config_clear(r);
     else if (post && !strcmp(p, "oauth/start")) route_oauth_start(r);

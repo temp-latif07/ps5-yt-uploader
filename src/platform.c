@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #ifdef __PROSPERO__
+#include <dlfcn.h>
 typedef struct notify_request {
     char useless1[45];
     char message[3075];
@@ -213,4 +214,105 @@ void plat_sleep_ms(int ms) {
     ts.tv_sec = ms / 1000;
     ts.tv_nsec = (long)(ms % 1000) * 1000000L;
     while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {}
+}
+
+#ifdef __PROSPERO__
+static int file_bytes_equal(const char *path, const unsigned char *data, size_t len) {
+    struct stat st;
+    if (stat(path, &st) != 0 || (size_t)st.st_size != len) return 0;
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    unsigned char *buf = malloc(len ? len : 1);
+    if (!buf) {
+        fclose(f);
+        return 0;
+    }
+    size_t got = fread(buf, 1, len, f);
+    fclose(f);
+    int eq = (got == len && memcmp(buf, data, len) == 0);
+    free(buf);
+    return eq;
+}
+
+static int write_file_bytes(const char *path, const unsigned char *data, size_t len) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return -1;
+    size_t off = 0;
+    int rc = 0;
+    while (off < len) {
+        ssize_t w = write(fd, data + off, len - off);
+        if (w < 0) {
+            if (errno == EINTR) continue;
+            rc = -1;
+            break;
+        }
+        if (w == 0) { rc = -1; break; }
+        off += (size_t)w;
+    }
+    if (close(fd) != 0) rc = -1;
+    if (rc != 0) unlink(path);
+    return rc;
+}
+#endif
+
+void plat_register_shell_tile(int port) {
+#ifdef __PROSPERO__
+    if (tile_icon_png_len == 0) return;
+
+    static const char *const tid = "YTUP08085";
+    char sysdir[128], ppath[160], ipath[160], pjson[512];
+    snprintf(sysdir, sizeof sysdir, "/user/app/%s/sce_sys", tid);
+    snprintf(ppath, sizeof ppath, "%s/param.json", sysdir);
+    snprintf(ipath, sizeof ipath, "%s/icon0.png", sysdir);
+    int plen = snprintf(pjson, sizeof pjson,
+                        "{\n"
+                        "  \"applicationCategoryType\": 66048,\n"
+                        "  \"titleId\": \"%s\",\n"
+                        "  \"deeplinkUri\": \"http://127.0.0.1:%d/\",\n"
+                        "  \"localizedParameters\": {\n"
+                        "    \"defaultLanguage\": \"en-US\",\n"
+                        "    \"en-US\": { \"titleName\": \"YouTube Uploader\" }\n"
+                        "  }\n"
+                        "}\n",
+                        tid, port);
+    if (plen <= 0 || (size_t)plen >= sizeof pjson) return;
+
+    if (file_bytes_equal(ppath, (const unsigned char *)pjson, (size_t)plen) &&
+        file_bytes_equal(ipath, tile_icon_png, tile_icon_png_len)) {
+        plat_log("tile: %s already staged", tid);
+        return;
+    }
+
+    if (mkdir_p(sysdir) != 0 ||
+        write_file_bytes(ppath, (const unsigned char *)pjson, (size_t)plen) != 0 ||
+        write_file_bytes(ipath, tile_icon_png, tile_icon_png_len) != 0) {
+        plat_log("tile: failed to stage %s assets: %s", tid, strerror(errno));
+        return;
+    }
+
+    void *h = dlopen("/system/common/lib/libSceAppInstUtil.sprx", RTLD_LAZY);
+    if (!h) {
+        plat_log("tile: libSceAppInstUtil unavailable (%s)", dlerror() ? dlerror() : "unknown");
+        return;
+    }
+    typedef int (*init_fn_t)(void);
+    typedef int (*term_fn_t)(void);
+    typedef int (*reg_fn_t)(const char *, const char *, void *);
+    init_fn_t init_fn = (init_fn_t)dlsym(h, "sceAppInstUtilInitialize");
+    reg_fn_t reg_fn = (reg_fn_t)dlsym(h, "sceAppInstUtilAppInstallTitleDir");
+    term_fn_t term_fn = (term_fn_t)dlsym(h, "sceAppInstUtilTerminate");
+    if (!reg_fn) {
+        plat_log("tile: sceAppInstUtilAppInstallTitleDir unavailable");
+        return;
+    }
+    if (init_fn) init_fn();
+    int rc = reg_fn(tid, "/user/app/", NULL);
+    if (term_fn) term_fn();
+
+    if (rc == 0) plat_notify("YouTube Uploader: home-screen tile installed");
+    else if ((uint32_t)rc == 0x80990002u) plat_log("tile: %s already registered", tid);
+    else plat_log("tile: %s registration returned 0x%08x", tid, (unsigned)rc);
+#else
+    (void)port;
+#endif
 }

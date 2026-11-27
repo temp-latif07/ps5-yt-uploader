@@ -38,6 +38,8 @@ int main(int argc, char **argv) {
     const char *env = getenv("PS5YT_PORT");
     if (env && atoi(env) > 0) port = atoi(env);
 
+    plat_register_shell_tile(port);
+
     char ip[64];
     plat_local_ip(ip, sizeof ip);
     plat_notify("YouTube Uploader: open http://%s:%d in a browser", ip, port);
